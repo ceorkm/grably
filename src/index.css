@@ -1,0 +1,191 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+:root {
+  /* Brandly Design System */
+  --milk: #FAF9F7;
+  --milk-light: #FDFCFB;
+  --milk-dark: #F5F3F0;
+  --orange: #FF6B35;
+  --orange-light: #FF8A5B;
+  --orange-dark: #E85A24;
+  --text-primary: #1F2937;
+  --text-secondary: #6B7280;
+  --text-muted: #9CA3AF;
+  --border-light: #E5E7EB;
+  --shadow-sm: 0 1px 2px 0 rgb(0 0 0 / 0.05);
+  --shadow-md: 0 4px 6px -1px rgb(0 0 0 / 0.1);
+  --shadow-lg: 0 10px 15px -3px rgb(0 0 0 / 0.1);
+  
+  /* Tailwind mappings */
+  --background: 27 58% 97%;
+  --foreground: 221 39% 11%;
+  --border: 214 32% 91%;
+  --primary: 16 91% 60%;
+  --radius: 0.75rem;
+}
+
+/* Brandly doesn't support dark mode - clean milk aesthetic only */
+.dark {
+  /* Inherit light theme values */
+}
+
+html, body, #root {
+  min-height: 100vh;
+  background: var(--milk);
+}
+
+body {
+  font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  color: var(--text-primary);
+  line-height: 1.6;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  font-size: 16px;
+}
+
+/* Custom YouTube Downloader Select Dropdown Styling */
+.youtube-format-select {
+  background: linear-gradient(135deg, #fff5eb 0%, #ffedd5 100%);
+}
+
+.youtube-format-select:focus {
+  background: linear-gradient(135deg, #ffedd5 0%, #fed7aa 100%);
+  box-shadow: 0 0 0 3px rgba(251, 146, 60, 0.2);
+}
+
+.youtube-format-select option {
+  background: white !important;
+  color: #ea580c !important;
+  font-weight: 600 !important;
+  padding: 8px !important;
+}
+
+.youtube-format-select option:checked {
+  background: linear-gradient(to right, #fb923c, #f97316) !important;
+  color: white !important;
+}
+
+.youtube-format-select optgroup {
+  background: #fed7aa !important;
+  color: #7c2d12 !important;
+  font-weight: 800 !important;
+}
+
+/* Simple scrollbar */
+::-webkit-scrollbar {
+  width: 8px;
+}
+
+::-webkit-scrollbar-track {
+  background: #fef7ed;
+}
+
+::-webkit-scrollbar-thumb {
+  background: #fed7aa;
+  border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: #fdba74;
+}
+
+/* Custom scrollbar for format options */
+.custom-scrollbar::-webkit-scrollbar {
+  width: 6px;
+}
+
+.custom-scrollbar::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.custom-scrollbar::-webkit-scrollbar-thumb {
+  background: #fed7aa;
+  border-radius: 3px;
+}
+
+.custom-scrollbar::-webkit-scrollbar-thumb:hover {
+  background: #fdba74;
+}
+
+/* Crazy animations */
+@keyframes wiggle {
+  0%, 100% { transform: rotate(-3deg); }
+  50% { transform: rotate(3deg); }
+}
+
+@keyframes float {
+  0%, 100% { transform: translateY(0px); }
+  50% { transform: translateY(-20px); }
+}
+
+@keyframes glow {
+  0%, 100% { 
+    box-shadow: 0 0 5px rgba(255, 107, 53, 0.5);
+  }
+  50% { 
+    box-shadow: 0 0 20px rgba(255, 107, 53, 0.8), 0 0 30px rgba(255, 107, 53, 0.6);
+  }
+}
+
+@keyframes shimmer {
+  0% { background-position: -200% 0; }
+  100% { background-position: 200% 0; }
+}
+
+@keyframes fadeIn {
+  from { 
+    opacity: 0;
+    transform: translateY(20px);
+  }
+  to { 
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.animate-fadeIn {
+  animation: fadeIn 0.7s ease-out;
+}
+
+.animate-wiggle {
+  animation: wiggle 2s ease-in-out infinite;
+}
+
+.animate-float {
+  animation: float 3s ease-in-out infinite;
+}
+
+.animate-glow {
+  animation: glow 2s ease-in-out infinite;
+}
+
+/* Custom utility classes for warm theme */
+.glassmorphism {
+  background: rgba(255, 255, 255, 0.8);
+  backdrop-filter: blur(12px);
+  border: 1px solid rgba(251, 191, 36, 0.2);
+  box-shadow: 0 8px 32px rgba(251, 146, 60, 0.1);
+}
+
+.glassmorphism-card {
+  background: rgba(255, 255, 255, 0.9);
+  backdrop-filter: blur(16px);
+  border: 1px solid rgba(251, 191, 36, 0.3);
+  box-shadow: 0 12px 40px rgba(251, 146, 60, 0.15);
+}
+
+.text-gradient {
+  background: linear-gradient(135deg, #f97316 0%, #f59e0b 50%, #d97706 100%);
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+  color: transparent;
+}
