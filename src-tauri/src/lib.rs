@@ -140,6 +140,52 @@ fn get_ffmpeg_path() -> String {
     "ffmpeg".to_string()
 }
 
+// Helper function to get the path to bundled whisper binary
+fn get_whisper_path() -> Result<(PathBuf, PathBuf), String> {
+    #[cfg(target_os = "macos")]
+    {
+        if let Ok(exe_path) = std::env::current_exe() {
+            println!("Executable path for whisper: {:?}", exe_path);
+            
+            // For bundled macOS app: executable is at Contents/MacOS/Grably
+            // Resources are at Contents/Resources/resources/
+            if let Some(macos_dir) = exe_path.parent() {
+                if let Some(contents_dir) = macos_dir.parent() {
+                    let bundled_whisper = contents_dir.join("Resources").join("resources").join("whisper");
+                    let bundled_model = contents_dir.join("Resources").join("resources").join("ggml-base.en.bin");
+                    println!("Checking bundled whisper at: {:?}", bundled_whisper);
+                    if bundled_whisper.exists() && bundled_model.exists() {
+                        println!("Found bundled whisper and model!");
+                        return Ok((bundled_whisper, bundled_model));
+                    }
+                }
+            }
+            
+            // For development
+            if let Some(parent) = exe_path.parent() {
+                let dev_whisper = parent.join("resources").join("whisper");
+                let dev_model = parent.join("resources").join("ggml-base.en.bin");
+                println!("Checking dev whisper at: {:?}", dev_whisper);
+                if dev_whisper.exists() && dev_model.exists() {
+                    println!("Found dev whisper and model!");
+                    return Ok((dev_whisper, dev_model));
+                }
+            }
+        }
+    }
+    
+    // Try CARGO_MANIFEST_DIR for development
+    let dev_dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("resources");
+    let dev_whisper = dev_dir.join("whisper");
+    let dev_model = dev_dir.join("ggml-base.en.bin");
+    if dev_whisper.exists() && dev_model.exists() {
+        println!("Found whisper in CARGO_MANIFEST_DIR!");
+        return Ok((dev_whisper, dev_model));
+    }
+    
+    Err("whisper.cpp or model not found in resources".to_string())
+}
+
 
 // Get playlist info
 #[tauri::command]
@@ -749,36 +795,10 @@ async fn transcribe_with_whisper(url: &str) -> Result<String, String> {
     }
     
     // Get the path to the whisper.cpp binary and model
-    let resource_dir = std::env::current_exe()
-        .map_err(|e| format!("Failed to get exe path: {}", e))?
-        .parent()
-        .ok_or("No parent dir")?
-        .parent()
-        .ok_or("No parent dir")?
-        .join("Resources")
-        .join("resources");  // Add resources subdirectory for bundled app
-    
-    let whisper_path = resource_dir.join("whisper");
-    let model_path = resource_dir.join("ggml-base.en.bin");
-    
-    // For development, use the local resources folder
-    let (whisper_path, model_path) = if !whisper_path.exists() {
-        let dev_dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("resources");
-        (dev_dir.join("whisper"), dev_dir.join("ggml-base.en.bin"))
-    } else {
-        (whisper_path, model_path)
-    };
-    
-    // Check if whisper.cpp exists
-    if !whisper_path.exists() {
+    let (whisper_path, model_path) = get_whisper_path().map_err(|e| {
         let _ = fs::remove_file(&audio_path);
-        return Err("whisper.cpp not found in resources".to_string());
-    }
-    
-    if !model_path.exists() {
-        let _ = fs::remove_file(&audio_path);
-        return Err("Whisper model not found in resources".to_string());
-    }
+        e
+    })?;
     
     println!("Using whisper.cpp at: {:?}", whisper_path);
     
@@ -1085,56 +1105,56 @@ async fn transcribe_universal(url: String) -> Result<String, String> {
 
 // Transcribe any audio/video file
 #[tauri::command]
-async fn transcribe_file(file_path: String) -> Result<String, String> {
-    println!("Transcribing file: {}", file_path);
+#[allow(non_snake_case)]
+async fn transcribe_file(filePath: String) -> Result<String, String> {
+    println!("Transcribing file: {}", filePath);
     
-    let path = PathBuf::from(&file_path);
+    let path = PathBuf::from(&filePath);
     if !path.exists() {
-        return Err("File not found".to_string());
+        println!("File not found at path: {:?}", path);
+        return Err(format!("File not found: {}", filePath));
     }
+    
+    println!("File exists at: {:?}", path);
     
     // Get the path to the whisper.cpp binary and model
-    let resource_dir = std::env::current_exe()
-        .map_err(|e| format!("Failed to get exe path: {}", e))?
-        .parent()
-        .ok_or("No parent dir")?
-        .parent()
-        .ok_or("No parent dir")?
-        .join("Resources")
-        .join("resources");  // Add resources subdirectory for bundled app
+    let (whisper_path, model_path) = get_whisper_path()?;
     
-    let whisper_path = resource_dir.join("whisper");
-    let model_path = resource_dir.join("ggml-base.en.bin");
-    
-    // For development, use the local resources folder
-    let (whisper_path, model_path) = if !whisper_path.exists() {
-        let dev_dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("resources");
-        (dev_dir.join("whisper"), dev_dir.join("ggml-base.en.bin"))
-    } else {
-        (whisper_path, model_path)
-    };
-    
-    // Check if whisper.cpp exists
-    if !whisper_path.exists() {
-        return Err("whisper.cpp not found in resources".to_string());
-    }
-    
-    if !model_path.exists() {
-        return Err("Whisper model not found in resources".to_string());
-    }
-    
-    // Create a temporary output file for transcript
+    // Create temporary files
     let timestamp = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .unwrap()
         .as_secs();
+    let wav_file = format!("/tmp/whisper_audio_{}.wav", timestamp);
     let output_file = format!("/tmp/whisper_file_output_{}", timestamp);
     
-    // Use whisper.cpp to transcribe
-    let output = Command::new(whisper_path)
+    // First convert the file to WAV using ffmpeg
+    println!("Converting to WAV: {} -> {}", filePath, wav_file);
+    let ffmpeg_output = Command::new(get_ffmpeg_path())
+        .args(&[
+            "-i", path.to_str().ok_or("Invalid file path")?,
+            "-ar", "16000",
+            "-ac", "1",
+            "-c:a", "pcm_s16le",
+            &wav_file,
+            "-y"
+        ])
+        .output()
+        .map_err(|e| format!("FFmpeg conversion failed: {}", e))?;
+    
+    if !ffmpeg_output.status.success() {
+        let stderr = String::from_utf8_lossy(&ffmpeg_output.stderr);
+        return Err(format!("FFmpeg conversion failed: {}", stderr));
+    }
+    
+    println!("Conversion successful, running whisper on WAV file");
+    
+    // Use whisper.cpp to transcribe the WAV file
+    println!("Running whisper with output file: {}", output_file);
+    let output = Command::new(&whisper_path)
         .args(&[
             "-m", model_path.to_str().ok_or("Invalid model path")?,
-            "-f", &file_path,
+            "-f", &wav_file,
             "-otxt",
             "-of", &output_file,
             "--no-timestamps",
@@ -1143,18 +1163,59 @@ async fn transcribe_file(file_path: String) -> Result<String, String> {
         .output()
         .map_err(|e| format!("whisper.cpp failed: {}", e))?;
     
+    println!("Whisper exit status: {}", output.status);
+    if !output.stderr.is_empty() {
+        println!("Whisper stderr: {}", String::from_utf8_lossy(&output.stderr));
+    }
+    if !output.stdout.is_empty() {
+        println!("Whisper stdout: {}", String::from_utf8_lossy(&output.stdout));
+    }
+    
     if output.status.success() {
         // Read the transcript file
         let transcript_path = format!("{}.txt", output_file);
+        println!("Looking for transcript at: {}", transcript_path);
+        
+        // Check if file exists
+        if !PathBuf::from(&transcript_path).exists() {
+            // Try without .txt extension
+            println!("File not found at {}, trying without .txt", transcript_path);
+            if PathBuf::from(&output_file).exists() {
+                println!("Found file at {}", output_file);
+                let transcript = fs::read_to_string(&output_file)
+                    .map_err(|e| format!("Failed to read transcript: {}", e))?;
+                let _ = fs::remove_file(&output_file);
+                return Ok(transcript.trim().to_string());
+            }
+            
+            // List files in /tmp to debug
+            println!("Files in /tmp matching pattern:");
+            if let Ok(entries) = fs::read_dir("/tmp") {
+                for entry in entries {
+                    if let Ok(entry) = entry {
+                        let path = entry.path();
+                        if path.to_string_lossy().contains("whisper_file_output") {
+                            println!("  Found: {:?}", path);
+                        }
+                    }
+                }
+            }
+            
+            return Err(format!("Transcript file not found at {} or {}", transcript_path, output_file));
+        }
+        
         let transcript = fs::read_to_string(&transcript_path)
             .map_err(|e| format!("Failed to read transcript: {}", e))?;
         
         // Clean up
         let _ = fs::remove_file(&transcript_path);
+        let _ = fs::remove_file(&wav_file);
         
         Ok(transcript.trim().to_string())
     } else {
         let stderr = String::from_utf8_lossy(&output.stderr);
+        // Clean up WAV file even on error
+        let _ = fs::remove_file(&wav_file);
         Err(format!("whisper.cpp transcription failed: {}", stderr))
     }
 }

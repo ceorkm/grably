@@ -1,59 +1,147 @@
+# Dependencies
+node_modules/
+.pnp
+.pnp.js
+package-lock.json
+yarn.lock
+pnpm-lock.yaml
+
+# Production builds
+/build
+/dist
+/dist-ssr
+/out
+*.local
+
+# Tauri
+src-tauri/target/
+src-tauri/WixTools/
+src-tauri/.cargo/
+
+# Resources (large binaries) - download separately
+src-tauri/resources/ffmpeg*
+src-tauri/resources/whisper*
+src-tauri/resources/yt-dlp*
+src-tauri/resources/ggml-*.bin
+src-tauri/resources/*.bin
+src-tauri/resources/*.7z
+src-tauri/resources/*.zip
+src-tauri/resources/test.*
+src-tauri/resources/*.mp3
+src-tauri/resources/*.mp4
+
+# DMG files and installers (ALL OF THEM!)
+*.dmg
+*.app
+*.pkg
+*.msi
+*.exe
+*.deb
+*.AppImage
+*.snap
+*.flatpak
+rw.*.dmg
+Grably*.dmg
+Grably*.zip
+Grably-*.dmg
+Grably_*.dmg
+
+# Signing and notarization
+entitlements.plist
+*.p12
+*.cer
+*.certSigningRequest
+*.mobileprovision
+Grably-for-notarization.zip
+CREDITS.md
+
+# Private folders
+/landing-page/
+/landing.html
+
+# Private scripts
+create-universal-dmg.sh
+download-binaries.sh
+test-*.sh
+test-*.js
+
+# Test files
+test-*.mp3
+test-*.mp4
+test-*.aiff
+test-download.*
+
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+Icon
+._*
+.DocumentRevisions-V100
+.fseventsd
+.Spotlight-V100
+.TemporaryItems
+.Trashes
+.VolumeIcon.icns
+.com.apple.timemachine.donotpresent
+.AppleDB
+.AppleDesktop
+Network Trash Folder
+Temporary Items
+.apdisk
+
 # Logs
-logs
+logs/
 *.log
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
-pnpm-debug.log*
 lerna-debug.log*
+.pnpm-debug.log*
+debug.log
+error.log
 
-node_modules
-dist
-dist-ssr
-*.local
-
-# Editor directories and files
+# Editor
 .vscode/*
 !.vscode/extensions.json
-.idea
-.DS_Store
+!.vscode/settings.json
+.idea/
 *.suo
 *.ntvs*
 *.njsproj
 *.sln
 *.sw?
-
-# Tauri build output
-src-tauri/target/
-src-tauri/WixTools/
-
-# Large binaries - download separately
-src-tauri/resources/ffmpeg
-src-tauri/resources/ffmpeg-arm64.7z
-src-tauri/resources/ggml-base.en.bin
-src-tauri/resources/whisper
-src-tauri/resources/whisper-macos.zip
-src-tauri/resources/yt-dlp
-src-tauri/resources/yt-dlp-old
-src-tauri/resources/ffmpeg-old
-
-# Build artifacts
-*.dmg
-*.app
-*.zip
-Grably.zip
-Grably_*.dmg
-
-# Test files
-test-audio.aiff
-test-download.mp4
-
-# Private keys - NEVER commit these
-*.key
-*.key.pub
-~/.tauri/
+*.swp
+*~
 
 # Environment variables
 .env
 .env.local
-.env.*.local
+.env.development.local
+.env.test.local
+.env.production.local
+
+# Cache
+.eslintcache
+.stylelintcache
+.parcel-cache
+.next
+.nuxt
+.cache
+.vuepress/dist
+.temp
+.docusaurus
+
+# Windows
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+$RECYCLE.BIN/
+
+# Credentials and secrets (NEVER commit)
+*.pem
+*.key
+*.key.pub
+~/.tauri/
+credentials.json
+secrets.json

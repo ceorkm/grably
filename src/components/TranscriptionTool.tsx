@@ -133,7 +133,11 @@ export const TranscriptionTool: React.FC<{ onBack: () => void }> = ({ onBack }) 
       
       if (job.platform === 'video' && job.filePath) {
         // Transcribe local file
+        console.log('Job object:', job);
+        console.log('Invoking transcribe_file with path:', job.filePath);
+        console.log('Sending params:', { filePath: job.filePath });
         result = await invoke('transcribe_file', { filePath: job.filePath });
+        console.log('Transcription result:', result);
       } else if (job.platform === 'youtube') {
         // Transcribe YouTube
         result = await invoke('transcribe_youtube', { url: job.url });
@@ -185,8 +189,10 @@ export const TranscriptionTool: React.FC<{ onBack: () => void }> = ({ onBack }) 
           : j
       ));
       
-      console.error('Transcription error:', error.message || 'Failed to transcribe');
-      toast.error(`Failed: ${job.fileName || job.url}`);
+      console.error('Transcription error:', error);
+      console.error('Error message:', error.message);
+      console.error('Job that failed:', job);
+      toast.error(`Failed: ${error.message || 'Unknown error'}`);
     }
   };
 

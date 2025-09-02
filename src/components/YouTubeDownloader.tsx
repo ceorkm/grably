@@ -535,15 +535,28 @@ export const YouTubeDownloader: React.FC<{ onBack: () => void }> = ({ onBack }) 
               <div className={`space-y-4 ${isPlaylist ? 'lg:col-span-2' : ''}`}>
                 {videoId ? (
                   <div className="relative rounded-2xl overflow-hidden shadow-xl">
-                    <div className="aspect-video bg-gray-900">
-                      <iframe
-                        src={`https://www.youtube.com/embed/${videoId}?rel=0&modestbranding=1&autoplay=0`}
-                        title="YouTube video player"
-                        frameBorder="0"
-                        allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
-                        allowFullScreen
-                        className="w-full h-full"
+                    <div 
+                      className="aspect-video bg-gray-900 cursor-pointer relative group"
+                      onClick={() => window.open(`https://www.youtube.com/watch?v=${videoId}`, '_blank')}
+                    >
+                      <img 
+                        src={`https://img.youtube.com/vi/${videoId}/maxresdefault.jpg`}
+                        alt="Video thumbnail"
+                        className="w-full h-full object-cover"
+                        onError={(e) => {
+                          e.currentTarget.src = `https://img.youtube.com/vi/${videoId}/hqdefault.jpg`;
+                        }}
                       />
+                      <div className="absolute inset-0 flex items-center justify-center bg-black bg-opacity-30 group-hover:bg-opacity-40 transition-all">
+                        <div className="w-20 h-20 bg-red-600 rounded-full flex items-center justify-center group-hover:scale-110 transition-transform">
+                          <svg className="w-10 h-10 text-white ml-1" fill="currentColor" viewBox="0 0 20 20">
+                            <path d="M6.3 2.841A1.5 1.5 0 004 4.11V15.89a1.5 1.5 0 002.3 1.269l9.344-5.89a1.5 1.5 0 000-2.538L6.3 2.84z" />
+                          </svg>
+                        </div>
+                      </div>
+                      <div className="absolute top-4 right-4 bg-black bg-opacity-75 text-white px-3 py-1 rounded-lg text-sm">
+                        Click to watch on YouTube
+                      </div>
                     </div>
                   </div>
                 ) : null}
