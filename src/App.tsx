@@ -1,12 +1,13 @@
 import { useState, useEffect } from 'react';
 import { Toaster } from 'react-hot-toast';
 import toast from 'react-hot-toast';
-import { Youtube, Globe2, Headphones, ArrowRight, Github } from 'lucide-react';
+import { Youtube, Globe2, Headphones, ArrowRight, Github, Newspaper } from 'lucide-react';
 import Typewriter from 'typewriter-effect';
 import { YouTubeDownloader } from './components/YouTubeDownloader';
 import { UniversalDownloader } from './components/UniversalDownloader';
 import { TranscriptionTool } from './components/TranscriptionTool';
 import { ActiveDownloads } from './components/ActiveDownloads';
+import { Changelog } from './components/Changelog';
 import { listen } from '@tauri-apps/api/event';
 import { open } from '@tauri-apps/plugin-shell';
 
@@ -39,6 +40,7 @@ function App() {
   const [hoveredCard, setHoveredCard] = useState<number | null>(null);
   const [subtitleVisible, setSubtitleVisible] = useState(false);
   const [freePercentage, setFreePercentage] = useState(100);
+  const [showChangelog, setShowChangelog] = useState(false);
   
 
   useEffect(() => {
@@ -151,8 +153,15 @@ function App() {
             </div>
 
 
-            {/* GitHub Link */}
-            <div className="fixed top-6 right-6 z-50">
+            {/* Top Right Buttons */}
+            <div className="fixed top-6 right-6 z-50 flex space-x-3">
+              <button
+                onClick={() => setShowChangelog(true)}
+                className="p-3 bg-white rounded-full shadow-md hover:shadow-lg transition-all duration-200 group"
+                title="What's New"
+              >
+                <Newspaper className="h-6 w-6 text-gray-600 group-hover:text-orange-500 transition-colors" />
+              </button>
               <button
                 onClick={() => open('https://github.com/ceorkm/grably')}
                 className="p-3 bg-white rounded-full shadow-md hover:shadow-lg transition-all duration-200 group"
@@ -302,13 +311,15 @@ function App() {
 
   return (
     <>
-
       {renderView()}
-
-
 
       {/* Active Downloads Widget */}
       <ActiveDownloads />
+
+      {/* Changelog Modal */}
+      {showChangelog && (
+        <Changelog onClose={() => setShowChangelog(false)} />
+      )}
 
       <Toaster
         position="bottom-right"

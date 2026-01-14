@@ -141,39 +141,6 @@ fn get_ffmpeg_path() -> String {
     "ffmpeg".to_string()
 }
 
-// Helper function to sanitize output template and prevent hidden files
-fn sanitize_output_template(template: &str, site_type: Option<&str>) -> String {
-    // Extract the base filename from the template path
-    let path = PathBuf::from(template);
-    let filename = path.file_name()
-        .and_then(|f| f.to_str())
-        .unwrap_or(template);
-
-    // Check if filename would be problematic (hidden/empty title)
-    if filename.starts_with('.') || filename.starts_with('_') ||
-       filename.starts_with("%(title)s") || filename.contains("%(title)s.") {
-        // Generate a safe fallback filename
-        let timestamp = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap()
-            .as_millis() % 10000;
-
-        let safe_name = match site_type {
-            Some(site) => format!("{}_video_{}.%(ext)s", site, timestamp),
-            None => format!("video_{}.%(ext)s", timestamp),
-        };
-
-        // Preserve the directory path
-        if let Some(parent) = path.parent() {
-            parent.join(safe_name).to_string_lossy().to_string()
-        } else {
-            safe_name
-        }
-    } else {
-        template.to_string()
-    }
-}
-
 // Helper function to get the path to bundled whisper binary
 fn get_whisper_path() -> Result<(PathBuf, PathBuf), String> {
     #[cfg(target_os = "macos")]
@@ -393,10 +360,7 @@ async fn download_youtube(
     }
     
     let output = output_path.unwrap_or_else(|| {
-        let now = chrono::Local::now();
-        let fallback_name = format!("YouTube Video {}", now.format("%Y-%m-%d %H-%M-%S"));
-        let template = grably_dir.join(format!("%(title|{})s.%(ext)s", fallback_name)).to_string_lossy().to_string();
-        sanitize_output_template(&template, Some("youtube"))
+        grably_dir.join("%(title)s.%(ext)s").to_string_lossy().to_string()
     });
     
     let mut args = vec![];
@@ -417,8 +381,6 @@ async fn download_youtube(
         "--progress".to_string(),
         "--newline".to_string(),
         "--force-overwrites".to_string(),  // Allow re-downloading existing files
-        "--restrict-filenames".to_string(), // Remove problematic characters from filenames
-        "--trim-filenames".to_string(), "200".to_string(), // Limit filename length
         "-o".to_string(),
         output.clone(),
     ]);
@@ -901,8 +863,6 @@ async fn download_universal(window: Window, url: String, site_type: Option<Strin
         "--progress",
         "--newline",
         "--force-overwrites",  // Allow re-downloading existing files
-        "--restrict-filenames", // Remove problematic characters from filenames
-        "--trim-filenames", "200", // Limit filename length
         "--user-agent",
         "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
         "--add-header",
@@ -969,13 +929,12 @@ async fn download_universal(window: Window, url: String, site_type: Option<Strin
             format!("facebook_%(id)s_{}.%(ext)s", timestamp)
         }
         _ => {
-            // Use video ID for sites like Ok.ru that have no titles
-            format!("video_%(id)s_{}.%(ext)s", timestamp)
+            // Generic output template
+            format!("%(title)s_{}.%(ext)s", timestamp)
         }
     };
     
-    let sanitized_template = sanitize_output_template(&output_template, site_type.as_deref());
-    let output_path = grably_dir.join(&sanitized_template);
+    let output_path = grably_dir.join(output_template);
     
     // Generate unique ID for this download
     use uuid::Uuid;
