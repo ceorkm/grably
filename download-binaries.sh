@@ -10,9 +10,9 @@ RESOURCES_DIR="src-tauri/resources"
 # Create resources directory if it doesn't exist
 mkdir -p "$RESOURCES_DIR"
 
-# Download yt-dlp (nightly build for latest fixes)
-echo "Downloading yt-dlp nightly..."
-curl -L https://github.com/yt-dlp/yt-dlp-nightly-builds/releases/latest/download/yt-dlp_macos -o "$RESOURCES_DIR/yt-dlp"
+# Download yt-dlp (stable release - nightly builds require Node.js)
+echo "Downloading yt-dlp stable..."
+curl -L https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp_macos -o "$RESOURCES_DIR/yt-dlp"
 chmod +x "$RESOURCES_DIR/yt-dlp"
 
 # Download ffmpeg (Universal binary for macOS)
