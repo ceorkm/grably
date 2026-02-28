@@ -104,7 +104,42 @@ fn get_ytdlp_path() -> String {
     "yt-dlp".to_string()
 }
 
-// Helper function to get the path to bundled ffmpeg binary  
+// Helper function to get the path to bundled deno binary
+fn get_deno_path() -> Option<String> {
+    #[cfg(target_os = "macos")]
+    {
+        if let Ok(exe_path) = std::env::current_exe() {
+            if let Some(macos_dir) = exe_path.parent() {
+                if let Some(contents_dir) = macos_dir.parent() {
+                    let bundled_deno = contents_dir.join("Resources").join("resources").join("deno");
+                    if bundled_deno.exists() {
+                        return Some(bundled_deno.to_string_lossy().to_string());
+                    }
+                }
+            }
+            // For development
+            if let Some(parent) = exe_path.parent() {
+                let dev_deno = parent.join("resources").join("deno");
+                if dev_deno.exists() {
+                    return Some(dev_deno.to_string_lossy().to_string());
+                }
+            }
+        }
+    }
+    // Fallback to system deno
+    None
+}
+
+// Get js-runtimes args for yt-dlp to use bundled deno
+fn get_js_runtime_args() -> Vec<String> {
+    if let Some(deno_path) = get_deno_path() {
+        vec!["--js-runtimes".to_string(), format!("deno:{}", deno_path)]
+    } else {
+        vec![]
+    }
+}
+
+// Helper function to get the path to bundled ffmpeg binary
 fn get_ffmpeg_path() -> String {
     #[cfg(target_os = "macos")]
     {
@@ -193,13 +228,10 @@ fn get_whisper_path() -> Result<(PathBuf, PathBuf), String> {
 async fn get_playlist_info(url: String) -> Result<PlaylistInfo, String> {
     println!("Getting playlist info for URL: {}", url);
     println!("This is a playlist URL, fetching playlist data...");
-    let output = Command::new(&get_ytdlp_path())
-        .args(&[
-            "--flat-playlist",
-            "-J",
-            &url
-        ])
-        .output()
+    let mut cmd = Command::new(&get_ytdlp_path());
+    cmd.args(&get_js_runtime_args());
+    cmd.args(&["--flat-playlist", "-J", &url]);
+    let output = cmd.output()
         .map_err(|e| format!("Failed to run yt-dlp: {}", e))?;
     
     if !output.status.success() {
@@ -250,15 +282,16 @@ async fn get_youtube_info(url: String) -> Result<VideoInfo, String> {
 
     args.push(&url);
 
-    let output = Command::new(&get_ytdlp_path())
-        .args(&args)
-        .output()
+    let mut cmd = Command::new(&get_ytdlp_path());
+    cmd.args(&get_js_runtime_args());
+    cmd.args(&args);
+    let output = cmd.output()
         .map_err(|e| format!("Failed to run yt-dlp: {}", e))?;
-    
+
     if !output.status.success() {
         return Err(String::from_utf8_lossy(&output.stderr).to_string());
     }
-    
+
     let json_str = String::from_utf8_lossy(&output.stdout);
     let data: serde_json::Value = serde_json::from_str(&json_str)
         .map_err(|e| format!("Failed to parse JSON: {}", e))?;
@@ -321,15 +354,16 @@ async fn get_youtube_info(url: String) -> Result<VideoInfo, String> {
 async fn get_youtube_formats(url: String) -> Result<Vec<String>, String> {
     let args = vec!["-F", "--no-playlist", &url];
     
-    let output = Command::new(&get_ytdlp_path())
-        .args(&args)
-        .output()
+    let mut cmd = Command::new(&get_ytdlp_path());
+    cmd.args(&get_js_runtime_args());
+    cmd.args(&args);
+    let output = cmd.output()
         .map_err(|e| format!("Failed to run yt-dlp: {}", e))?;
-    
+
     if !output.status.success() {
         return Err(String::from_utf8_lossy(&output.stderr).to_string());
     }
-    
+
     let output_str = String::from_utf8_lossy(&output.stdout);
     let formats: Vec<String> = output_str
         .lines()
@@ -449,9 +483,10 @@ async fn download_youtube(
         let mut title_args = vec!["--get-title"];
         title_args.push(&url_for_title);
 
-        if let Ok(output) = Command::new(&get_ytdlp_path())
-            .args(&title_args)
-            .output() {
+        let mut title_cmd = Command::new(&get_ytdlp_path());
+        title_cmd.args(&get_js_runtime_args());
+        title_cmd.args(&title_args);
+        if let Ok(output) = title_cmd.output() {
             if let Ok(title) = String::from_utf8(output.stdout) {
                 let title = title.trim().to_string();
                 if !title.is_empty() {
@@ -470,13 +505,15 @@ async fn download_youtube(
     let filename = temp_filename; // Use temp filename for now
     
     // Spawn the download process
-    let mut child = Command::new(&get_ytdlp_path())
-        .args(&args)
+    let mut child = Command::new(&get_ytdlp_path());
+    child.args(&get_js_runtime_args());
+    child.args(&args);
+    let mut child = child
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .spawn()
         .map_err(|e| format!("Failed to start download: {}", e))?;
-    
+
     // Get download path for completion notification
     let download_path = grably_dir.join(&filename);
     let download_path_str = download_path.to_string_lossy().to_string();
@@ -636,12 +673,10 @@ async fn transcribe_youtube(url: String) -> Result<String, String> {
 
 async fn get_youtube_subtitles(url: &str) -> Result<String, String> {
     // First get the video ID
-    let id_output = Command::new(&get_ytdlp_path())
-        .args(&[
-            "--print", "id",
-            url
-        ])
-        .output()
+    let mut id_cmd = Command::new(&get_ytdlp_path());
+    id_cmd.args(&get_js_runtime_args());
+    id_cmd.args(&["--print", "id", url]);
+    let id_output = id_cmd.output()
         .map_err(|e| format!("Failed to get video ID: {}", e))?;
     
     if !id_output.status.success() {
@@ -657,16 +692,17 @@ async fn get_youtube_subtitles(url: &str) -> Result<String, String> {
     // Now actually download the subtitles
     let subtitle_path = format!("/tmp/{}.en.vtt", video_id);
     
-    let download_output = Command::new(&get_ytdlp_path())
-        .args(&[
-            "--skip-download",
-            "--write-auto-subs",  // Get auto-generated subtitles
-            "--sub-lang", "en",
-            "--convert-subs", "vtt",  // Convert to VTT format
-            "--output", &format!("/tmp/{}", video_id),
-            url
-        ])
-        .output()
+    let mut sub_cmd = Command::new(&get_ytdlp_path());
+    sub_cmd.args(&get_js_runtime_args());
+    sub_cmd.args(&[
+        "--skip-download",
+        "--write-auto-subs",
+        "--sub-lang", "en",
+        "--convert-subs", "vtt",
+        "--output", &format!("/tmp/{}", video_id),
+        url
+    ]);
+    let download_output = sub_cmd.output()
         .map_err(|e| format!("Failed to download subtitles: {}", e))?;
     
     if !download_output.status.success() {
@@ -789,9 +825,10 @@ async fn transcribe_with_whisper(url: &str) -> Result<String, String> {
     // Add the URL at the end
     args.push(final_url);
     
-    let output = Command::new(&get_ytdlp_path())
-        .args(&args)
-        .output()
+    let mut audio_cmd = Command::new(&get_ytdlp_path());
+    audio_cmd.args(&get_js_runtime_args());
+    audio_cmd.args(&args);
+    let output = audio_cmd.output()
         .map_err(|e| format!("Failed to download audio: {}", e))?;
     
     if !output.status.success() {
@@ -960,9 +997,10 @@ async fn download_universal(window: Window, url: String, site_type: Option<Strin
         let mut title_args = vec!["--get-title"];
         title_args.push(&url_for_title);
 
-        if let Ok(output) = Command::new(&get_ytdlp_path())
-            .args(&title_args)
-            .output() {
+        let mut title_cmd2 = Command::new(&get_ytdlp_path());
+        title_cmd2.args(&get_js_runtime_args());
+        title_cmd2.args(&title_args);
+        if let Ok(output) = title_cmd2.output() {
             if let Ok(title) = String::from_utf8(output.stdout) {
                 let title = title.trim().to_string();
                 if !title.is_empty() {
@@ -989,14 +1027,16 @@ async fn download_universal(window: Window, url: String, site_type: Option<Strin
     let download_path_str = output_path.to_string_lossy().to_string();
     
     // Spawn the download process
-    let mut child = Command::new(&get_ytdlp_path())
-        .args(&owned_args)
+    let mut dl_cmd = Command::new(&get_ytdlp_path());
+    dl_cmd.args(&get_js_runtime_args());
+    dl_cmd.args(&owned_args);
+    let mut child = dl_cmd
         .current_dir(&grably_dir)
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .spawn()
         .map_err(|e| format!("Failed to start download: {}", e))?;
-    
+
     // Read all output in background
     if let Some(stdout) = child.stdout.take() {
         let stderr = child.stderr.take();

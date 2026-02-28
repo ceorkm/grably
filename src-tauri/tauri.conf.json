@@ -37,7 +37,8 @@
       "resources/whisper",
       "resources/ggml-base.en.bin",
       "resources/yt-dlp",
-      "resources/ffmpeg"
+      "resources/ffmpeg",
+      "resources/deno"
     ]
   },
   "plugins": {}
