@@ -2,6 +2,8 @@ use std::process::{Command, Stdio};
 use std::path::PathBuf;
 use std::fs;
 use std::io::{BufRead, BufReader};
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::OnceLock;
 use serde::{Deserialize, Serialize};
 use tauri::{Emitter, Manager, Window};
 
@@ -58,50 +60,178 @@ struct PlaylistInfo {
     thumbnail: Option<String>,
 }
 
-// Helper function to get the path to bundled yt-dlp binary
-fn get_ytdlp_path() -> String {
-    #[cfg(target_os = "macos")]
-    {
-        if let Ok(exe_path) = std::env::current_exe() {
-            println!("Executable path: {:?}", exe_path);
-            
-            // For bundled macOS app: executable is at Contents/MacOS/Grably
-            // Resources are at Contents/Resources/resources/
-            if let Some(macos_dir) = exe_path.parent() {
-                if let Some(contents_dir) = macos_dir.parent() {
-                    // First try the binary
-                    let bundled_ytdlp = contents_dir.join("Resources").join("resources").join("yt-dlp");
-                    println!("Checking bundled yt-dlp at: {:?}", bundled_ytdlp);
-                    if bundled_ytdlp.exists() {
-                        println!("Found bundled yt-dlp!");
-                        return bundled_ytdlp.to_string_lossy().to_string();
-                    }
-                    
-                    // Fallback to Python version if binary doesn't work
-                    let bundled_ytdlp_py = contents_dir.join("Resources").join("resources").join("yt-dlp.py");
-                    if bundled_ytdlp_py.exists() {
-                        println!("Using Python yt-dlp fallback!");
-                        // Return a special marker that we'll handle in Command execution
-                        return format!("PYTHON:{}", bundled_ytdlp_py.to_string_lossy());
-                    }
-                }
-            }
-            
-            // For development
-            if let Some(parent) = exe_path.parent() {
-                let dev_ytdlp = parent.join("resources").join("yt-dlp");
-                println!("Checking dev yt-dlp at: {:?}", dev_ytdlp);
-                if dev_ytdlp.exists() {
-                    println!("Found dev yt-dlp!");
-                    return dev_ytdlp.to_string_lossy().to_string();
-                }
+#[derive(Debug, Serialize, Deserialize, Clone)]
+struct HistoryEntry {
+    id: String,
+    #[serde(rename = "entryType")]
+    entry_type: String,
+    title: String,
+    #[serde(rename = "sourceUrl")]
+    source_url: String,
+    #[serde(rename = "filePath")]
+    file_path: Option<String>,
+    #[serde(rename = "transcriptText")]
+    transcript_text: Option<String>,
+    #[serde(rename = "siteType")]
+    site_type: Option<String>,
+    #[serde(rename = "fileSizeBytes")]
+    file_size_bytes: Option<u64>,
+    timestamp: u64,
+}
+
+fn get_history_path() -> Result<PathBuf, String> {
+    let mut dir = dirs::config_dir()
+        .ok_or_else(|| "config dir not found".to_string())?;
+    dir.push("com.grably.desktop");
+    fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+    dir.push("history.json");
+    Ok(dir)
+}
+
+fn read_history_entries() -> Vec<HistoryEntry> {
+    match get_history_path() {
+        Ok(p) if p.exists() => {
+            fs::read_to_string(&p)
+                .ok()
+                .and_then(|s| serde_json::from_str::<Vec<HistoryEntry>>(&s).ok())
+                .unwrap_or_default()
+        }
+        _ => Vec::new(),
+    }
+}
+
+fn write_history_entries(entries: &[HistoryEntry]) -> Result<(), String> {
+    let path = get_history_path()?;
+    let json = serde_json::to_string_pretty(entries).map_err(|e| e.to_string())?;
+    fs::write(&path, json).map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+fn append_history(entry: HistoryEntry) {
+    let mut entries = read_history_entries();
+    entries.insert(0, entry);
+    if entries.len() > 1000 {
+        entries.truncate(1000);
+    }
+    let _ = write_history_entries(&entries);
+}
+
+fn now_unix() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0)
+}
+
+fn parse_destination_from_line(line: &str) -> Option<String> {
+    if let Some(idx) = line.find("[download] Destination: ") {
+        return Some(line[idx + "[download] Destination: ".len()..].trim().to_string());
+    }
+    if line.contains("[Merger] Merging formats into ") {
+        if let Some(start) = line.find('"') {
+            if let Some(end_rel) = line[start + 1..].find('"') {
+                return Some(line[start + 1..start + 1 + end_rel].to_string());
             }
         }
     }
-    
-    println!("Falling back to system yt-dlp");
-    // Fallback to system yt-dlp
-    "yt-dlp".to_string()
+    if let Some(idx) = line.find("[ExtractAudio] Destination: ") {
+        return Some(line[idx + "[ExtractAudio] Destination: ".len()..].trim().to_string());
+    }
+    None
+}
+
+fn record_transcription_history(source: &str, transcript: &str, site_type: Option<&str>) {
+    let title = std::path::Path::new(source)
+        .file_name()
+        .map(|n| n.to_string_lossy().to_string())
+        .unwrap_or_else(|| source.to_string());
+    append_history(HistoryEntry {
+        id: uuid::Uuid::new_v4().to_string(),
+        entry_type: "transcription".to_string(),
+        title,
+        source_url: source.to_string(),
+        file_path: None,
+        transcript_text: Some(transcript.to_string()),
+        site_type: site_type.map(|s| s.to_string()),
+        file_size_bytes: None,
+        timestamp: now_unix(),
+    });
+}
+
+fn finalize_download_and_record(
+    window: &Window,
+    download_id: &str,
+    fallback_filename: &str,
+    fallback_path: &str,
+    final_dest: &Option<String>,
+    source_url: &str,
+    site_type: Option<&str>,
+) {
+    let final_path = final_dest.clone().unwrap_or_else(|| fallback_path.to_string());
+    let final_name = std::path::Path::new(&final_path)
+        .file_name()
+        .map(|n| n.to_string_lossy().to_string())
+        .unwrap_or_else(|| fallback_filename.to_string());
+
+    window.emit("download-complete", serde_json::json!({
+        "filename": final_name,
+        "path": final_path,
+        "id": download_id,
+    })).ok();
+
+    let size = fs::metadata(&final_path).ok().map(|m| m.len());
+    append_history(HistoryEntry {
+        id: uuid::Uuid::new_v4().to_string(),
+        entry_type: "download".to_string(),
+        title: final_name,
+        source_url: source_url.to_string(),
+        file_path: Some(final_path),
+        transcript_text: None,
+        site_type: site_type.map(|s| s.to_string()),
+        file_size_bytes: size,
+        timestamp: now_unix(),
+    });
+}
+
+// Helper function to get the path to bundled yt-dlp binary (cached after first call)
+fn get_ytdlp_path() -> String {
+    static CACHED_PATH: OnceLock<String> = OnceLock::new();
+    CACHED_PATH.get_or_init(|| {
+        #[cfg(target_os = "macos")]
+        {
+            if let Ok(exe_path) = std::env::current_exe() {
+                // For bundled macOS app: executable is at Contents/MacOS/Grably
+                // Resources are at Contents/Resources/resources/
+                if let Some(macos_dir) = exe_path.parent() {
+                    if let Some(contents_dir) = macos_dir.parent() {
+                        let bundled_ytdlp = contents_dir.join("Resources").join("resources").join("yt-dlp");
+                        if bundled_ytdlp.exists() {
+                            println!("Using bundled yt-dlp: {:?}", bundled_ytdlp);
+                            return bundled_ytdlp.to_string_lossy().to_string();
+                        }
+
+                        let bundled_ytdlp_py = contents_dir.join("Resources").join("resources").join("yt-dlp.py");
+                        if bundled_ytdlp_py.exists() {
+                            println!("Using Python yt-dlp fallback: {:?}", bundled_ytdlp_py);
+                            return format!("PYTHON:{}", bundled_ytdlp_py.to_string_lossy());
+                        }
+                    }
+                }
+
+                // For development
+                if let Some(parent) = exe_path.parent() {
+                    let dev_ytdlp = parent.join("resources").join("yt-dlp");
+                    if dev_ytdlp.exists() {
+                        println!("Using dev yt-dlp: {:?}", dev_ytdlp);
+                        return dev_ytdlp.to_string_lossy().to_string();
+                    }
+                }
+            }
+        }
+
+        println!("Using system yt-dlp");
+        "yt-dlp".to_string()
+    }).clone()
 }
 
 // Helper function to get the path to bundled deno binary
@@ -139,41 +269,36 @@ fn get_js_runtime_args() -> Vec<String> {
     }
 }
 
-// Helper function to get the path to bundled ffmpeg binary
+// Helper function to get the path to bundled ffmpeg binary (cached after first call)
 fn get_ffmpeg_path() -> String {
-    #[cfg(target_os = "macos")]
-    {
-        if let Ok(exe_path) = std::env::current_exe() {
-            println!("Executable path for ffmpeg: {:?}", exe_path);
-            
-            // For bundled macOS app: executable is at Contents/MacOS/Grably
-            // Resources are at Contents/Resources/resources/
-            if let Some(macos_dir) = exe_path.parent() {
-                if let Some(contents_dir) = macos_dir.parent() {
-                    let bundled_ffmpeg = contents_dir.join("Resources").join("resources").join("ffmpeg");
-                    println!("Checking bundled ffmpeg at: {:?}", bundled_ffmpeg);
-                    if bundled_ffmpeg.exists() {
-                        println!("Found bundled ffmpeg!");
-                        return bundled_ffmpeg.to_string_lossy().to_string();
+    static CACHED_PATH: OnceLock<String> = OnceLock::new();
+    CACHED_PATH.get_or_init(|| {
+        #[cfg(target_os = "macos")]
+        {
+            if let Ok(exe_path) = std::env::current_exe() {
+                if let Some(macos_dir) = exe_path.parent() {
+                    if let Some(contents_dir) = macos_dir.parent() {
+                        let bundled_ffmpeg = contents_dir.join("Resources").join("resources").join("ffmpeg");
+                        if bundled_ffmpeg.exists() {
+                            println!("Using bundled ffmpeg: {:?}", bundled_ffmpeg);
+                            return bundled_ffmpeg.to_string_lossy().to_string();
+                        }
+                    }
+                }
+
+                if let Some(parent) = exe_path.parent() {
+                    let dev_ffmpeg = parent.join("resources").join("ffmpeg");
+                    if dev_ffmpeg.exists() {
+                        println!("Using dev ffmpeg: {:?}", dev_ffmpeg);
+                        return dev_ffmpeg.to_string_lossy().to_string();
                     }
                 }
             }
-            
-            // For development
-            if let Some(parent) = exe_path.parent() {
-                let dev_ffmpeg = parent.join("resources").join("ffmpeg");
-                println!("Checking dev ffmpeg at: {:?}", dev_ffmpeg);
-                if dev_ffmpeg.exists() {
-                    println!("Found dev ffmpeg!");
-                    return dev_ffmpeg.to_string_lossy().to_string();
-                }
-            }
         }
-    }
-    
-    println!("Falling back to system ffmpeg");
-    // Fallback to system ffmpeg
-    "ffmpeg".to_string()
+
+        println!("Using system ffmpeg");
+        "ffmpeg".to_string()
+    }).clone()
 }
 
 // Helper function to get the path to bundled whisper binary
@@ -518,15 +643,21 @@ async fn download_youtube(
     let download_path = grably_dir.join(&filename);
     let download_path_str = download_path.to_string_lossy().to_string();
     
+    let url_for_history = url.clone();
+
     // Read all output in background
     if let Some(stdout) = child.stdout.take() {
         let stderr = child.stderr.take();
         std::thread::spawn(move || {
             let reader = BufReader::new(stdout);
             let mut completed = false;
-            
+            let mut current_dest: Option<String> = None;
+
             for line in reader.lines() {
                 if let Ok(line) = line {
+                    if let Some(dest) = parse_destination_from_line(&line) {
+                        current_dest = Some(dest);
+                    }
                     // Stream all output for real-time status
                     if line.starts_with("[") {
                         // Parse different yt-dlp status messages
@@ -549,24 +680,34 @@ async fn download_youtube(
                                 progress.filename = Some(filename.clone());
                                 progress.id = Some(download_id.clone());
                                 window.emit("download-progress", &progress).ok();
-                                
+
                                 // Check if download completed (only emit once)
                                 if !completed && progress.percent >= 100.0 {
                                     completed = true;
-                                    window.emit("download-complete", serde_json::json!({
-                                        "filename": filename.clone(),
-                                        "path": download_path_str.clone()
-                                    })).ok();
+                                    finalize_download_and_record(
+                                        &window,
+                                        &download_id,
+                                        &filename,
+                                        &download_path_str,
+                                        &current_dest,
+                                        &url_for_history,
+                                        None,
+                                    );
                                 }
                             }
                             continue; // Skip status update for progress lines
                         } else if line.contains("has already been downloaded") {
                             if !completed {
                                 completed = true;
-                                window.emit("download-complete", serde_json::json!({
-                                    "filename": filename.clone(),
-                                    "path": download_path_str.clone()
-                                })).ok();
+                                finalize_download_and_record(
+                                    &window,
+                                    &download_id,
+                                    &filename,
+                                    &download_path_str,
+                                    &current_dest,
+                                    &url_for_history,
+                                    None,
+                                );
                             }
                             continue;
                         } else {
@@ -656,11 +797,12 @@ fn parse_progress(line: &str) -> Option<DownloadProgress> {
 #[tauri::command]
 async fn transcribe_youtube(url: String) -> Result<String, String> {
     println!("Transcribing YouTube video: {}", url);
-    
+
     // Try to get YouTube subtitles ONLY - no fallback
     match get_youtube_subtitles(&url).await {
         Ok(transcript) => {
             println!("Got subtitles from YouTube");
+            record_transcription_history(&url, &transcript, Some("youtube"));
             Ok(transcript)
         }
         Err(e) => {
@@ -772,12 +914,14 @@ async fn transcribe_with_whisper(url: &str) -> Result<String, String> {
     // Download audio first
     println!("Downloading audio from: {}", url);
     
-    // Use unique timestamp for temp files to avoid reuse
+    // Use atomic counter for unique temp files (avoids collision in bulk mode)
+    static COUNTER: AtomicU64 = AtomicU64::new(0);
+    let id = COUNTER.fetch_add(1, Ordering::Relaxed);
     let timestamp = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .unwrap()
         .as_secs();
-    let audio_path = format!("/tmp/audio_temp_{}.mp3", timestamp);
+    let audio_path = format!("/tmp/audio_temp_{}_{}.mp3", timestamp, id);
     let audio_path_str = audio_path.as_str();
     
     // Convert Facebook URLs to mobile version for better compatibility
@@ -1018,6 +1162,9 @@ async fn download_universal(window: Window, url: String, site_type: Option<Strin
     
     let filename = temp_filename; // Use temp filename for now
     
+    let url_for_history = url.clone();
+    let site_type_for_history = site_type.clone();
+
     let mut owned_args: Vec<String> = args.iter().map(|s| s.to_string()).collect();
     owned_args.push("-o".to_string());
     owned_args.push(output_path.to_string_lossy().to_string());
@@ -1043,9 +1190,13 @@ async fn download_universal(window: Window, url: String, site_type: Option<Strin
         std::thread::spawn(move || {
             let reader = BufReader::new(stdout);
             let mut completed = false;
-            
+            let mut current_dest: Option<String> = None;
+
             for line in reader.lines() {
                 if let Ok(line) = line {
+                    if let Some(dest) = parse_destination_from_line(&line) {
+                        current_dest = Some(dest);
+                    }
                     // Stream all output for real-time status
                     if line.starts_with("[") {
                         // Parse different yt-dlp status messages
@@ -1070,24 +1221,34 @@ async fn download_universal(window: Window, url: String, site_type: Option<Strin
                                 progress.filename = Some(filename.clone());
                                 progress.id = Some(download_id.clone());
                                 window.emit("download-progress", &progress).ok();
-                                
+
                                 // Check if download completed (only emit once)
                                 if !completed && progress.percent >= 100.0 {
                                     completed = true;
-                                    window.emit("download-complete", serde_json::json!({
-                                        "filename": filename.clone(),
-                                        "path": download_path_str.clone()
-                                    })).ok();
+                                    finalize_download_and_record(
+                                        &window,
+                                        &download_id,
+                                        &filename,
+                                        &download_path_str,
+                                        &current_dest,
+                                        &url_for_history,
+                                        site_type_for_history.as_deref(),
+                                    );
                                 }
                             }
                             continue; // Skip status update for progress lines
                         } else if line.contains("has already been downloaded") {
                             if !completed {
                                 completed = true;
-                                window.emit("download-complete", serde_json::json!({
-                                    "filename": filename.clone(),
-                                    "path": download_path_str.clone()
-                                })).ok();
+                                finalize_download_and_record(
+                                    &window,
+                                    &download_id,
+                                    &filename,
+                                    &download_path_str,
+                                    &current_dest,
+                                    &url_for_history,
+                                    site_type_for_history.as_deref(),
+                                );
                             }
                             continue;
                         } else {
@@ -1142,7 +1303,11 @@ async fn download_universal(window: Window, url: String, site_type: Option<Strin
 async fn transcribe_tiktok(url: String) -> Result<String, String> {
     println!("Transcribing TikTok video: {}", url);
     // TikTok goes straight to Whisper
-    transcribe_with_whisper(&url).await
+    let result = transcribe_with_whisper(&url).await;
+    if let Ok(ref transcript) = result {
+        record_transcription_history(&url, transcript, Some("tiktok"));
+    }
+    result
 }
 
 // Transcribe any universal URL
@@ -1150,7 +1315,11 @@ async fn transcribe_tiktok(url: String) -> Result<String, String> {
 async fn transcribe_universal(url: String) -> Result<String, String> {
     println!("Transcribing universal URL: {}", url);
     // Universal URLs go straight to Whisper
-    transcribe_with_whisper(&url).await
+    let result = transcribe_with_whisper(&url).await;
+    if let Ok(ref transcript) = result {
+        record_transcription_history(&url, transcript, Some("universal"));
+    }
+    result
 }
 
 // Transcribe any audio/video file
@@ -1260,8 +1429,10 @@ async fn transcribe_file(filePath: String) -> Result<String, String> {
         // Clean up
         let _ = fs::remove_file(&transcript_path);
         let _ = fs::remove_file(&wav_file);
-        
-        Ok(transcript.trim().to_string())
+
+        let final_transcript = transcript.trim().to_string();
+        record_transcription_history(&filePath, &final_transcript, Some("file"));
+        Ok(final_transcript)
     } else {
         let stderr = String::from_utf8_lossy(&output.stderr);
         // Clean up WAV file even on error
@@ -1292,6 +1463,42 @@ async fn quit_app(app: tauri::AppHandle) -> Result<(), String> {
     Ok(())
 }
 
+#[tauri::command]
+async fn get_history() -> Result<Vec<HistoryEntry>, String> {
+    Ok(read_history_entries())
+}
+
+#[tauri::command]
+async fn delete_history_entry(id: String) -> Result<(), String> {
+    let mut entries = read_history_entries();
+    entries.retain(|e| e.id != id);
+    write_history_entries(&entries)
+}
+
+#[tauri::command]
+async fn clear_history() -> Result<(), String> {
+    write_history_entries(&[])
+}
+
+#[tauri::command]
+async fn reveal_in_finder(path: String) -> Result<(), String> {
+    Command::new("open")
+        .arg("-R")
+        .arg(&path)
+        .spawn()
+        .map_err(|e| format!("Failed to reveal in Finder: {}", e))?;
+    Ok(())
+}
+
+#[tauri::command]
+async fn open_path(path: String) -> Result<(), String> {
+    Command::new("open")
+        .arg(&path)
+        .spawn()
+        .map_err(|e| format!("Failed to open path: {}", e))?;
+    Ok(())
+}
+
 
 
 
@@ -1316,6 +1523,11 @@ pub fn run() {
             transcribe_file,
             show_main_window,
             quit_app,
+            get_history,
+            delete_history_entry,
+            clear_history,
+            reveal_in_finder,
+            open_path,
         ])
         .setup(|_app| {
             println!("Grably Desktop initialized - using bundled yt-dlp binary");

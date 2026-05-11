@@ -1,13 +1,13 @@
 import { useState, useEffect } from 'react';
 import { Toaster } from 'react-hot-toast';
 import toast from 'react-hot-toast';
-import { Youtube, Globe2, Headphones, ArrowRight, Github, Newspaper } from 'lucide-react';
+import { Youtube, Globe2, Headphones, ArrowRight, Github, History } from 'lucide-react';
 import Typewriter from 'typewriter-effect';
 import { YouTubeDownloader } from './components/YouTubeDownloader';
 import { UniversalDownloader } from './components/UniversalDownloader';
 import { TranscriptionTool } from './components/TranscriptionTool';
 import { ActiveDownloads } from './components/ActiveDownloads';
-import { Changelog } from './components/Changelog';
+import { HistoryView } from './components/HistoryView';
 import { listen } from '@tauri-apps/api/event';
 import { open } from '@tauri-apps/plugin-shell';
 
@@ -40,7 +40,7 @@ function App() {
   const [hoveredCard, setHoveredCard] = useState<number | null>(null);
   const [subtitleVisible, setSubtitleVisible] = useState(false);
   const [freePercentage, setFreePercentage] = useState(100);
-  const [showChangelog, setShowChangelog] = useState(false);
+  const [showHistory, setShowHistory] = useState(false);
   
 
   useEffect(() => {
@@ -156,11 +156,11 @@ function App() {
             {/* Top Right Buttons */}
             <div className="fixed top-6 right-6 z-50 flex space-x-3">
               <button
-                onClick={() => setShowChangelog(true)}
+                onClick={() => setShowHistory(true)}
                 className="p-3 bg-white rounded-full shadow-md hover:shadow-lg transition-all duration-200 group"
-                title="What's New"
+                title="History"
               >
-                <Newspaper className="h-6 w-6 text-gray-600 group-hover:text-orange-500 transition-colors" />
+                <History className="h-6 w-6 text-gray-600 group-hover:text-orange-500 transition-colors" />
               </button>
               <button
                 onClick={() => open('https://github.com/ceorkm/grably')}
@@ -300,9 +300,20 @@ function App() {
 
             {/* Footer text */}
             <div className="text-center mt-20">
-              <p style={{fontFamily: 'Courier Prime, monospace', fontSize: '12px', color: '#9ca3af'}}>
-                Made with ❤️
-              </p>
+              <button
+                onClick={() => open('https://x.com/ceorkm')}
+                className="inline-flex items-center gap-2 hover:opacity-80 transition-opacity"
+                style={{fontFamily: 'Courier Prime, monospace', fontSize: '12px', color: '#9ca3af'}}
+              >
+                Made with ❤️ by
+                <img
+                  src="https://unavatar.io/twitter/ceorkm"
+                  alt="ceorkm"
+                  className="w-7 h-7 rounded-full border border-gray-200 shadow-sm"
+                  onError={(e) => { (e.currentTarget as HTMLImageElement).style.display = 'none'; }}
+                />
+                <span className="underline">ceorkm</span>
+              </button>
             </div>
           </div>
         );
@@ -316,9 +327,9 @@ function App() {
       {/* Active Downloads Widget */}
       <ActiveDownloads />
 
-      {/* Changelog Modal */}
-      {showChangelog && (
-        <Changelog onClose={() => setShowChangelog(false)} />
+      {/* History Modal */}
+      {showHistory && (
+        <HistoryView onClose={() => setShowHistory(false)} />
       )}
 
       <Toaster

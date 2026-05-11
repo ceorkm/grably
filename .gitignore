@@ -160,3 +160,39 @@ $RECYCLE.BIN/
 ~/.tauri/
 credentials.json
 secrets.json
+
+# Personal media files at repo root (random downloaded videos, etc.)
+/*.mp4
+/*.mkv
+/*.mov
+/*.webm
+/*.m4a
+/*.wav
+/*.vtt
+/*.srt
+
+# Scraping / research artifacts
+firecrawl*.txt
+httrack-scraped*
+wget-scraped*
+grably-space-source.html
+grably-styles.css
+scraped-grably/
+
+# Personal notes and HTML prototypes
+lookatme.md
+FeaturesToAdd.md
+queue-fix-test.html
+show.html
+landing.html
+pages-showcase/
+dmg_upload.log
+
+# Bundled native binaries (download via download-binaries.sh — not in repo)
+src-tauri/resources/deno
+src-tauri/resources/*.dylib
+
+# Build/staging directories not already covered
+dist-staging/
+dmg-staging/
+Grably.app/

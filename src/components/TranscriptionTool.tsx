@@ -1,8 +1,9 @@
 import React, { useState } from 'react';
-import { invoke } from '@tauri-apps/api/core';
 import { open } from '@tauri-apps/plugin-dialog';
-import { FileVideo, Youtube, Mic, Loader2, Check, Copy, Download, Sparkles, Globe, X, Clock, CheckCircle, AlertCircle, Upload, Headphones, Brain, Activity, FileText, Link, Cloud, Settings, FileAudio, ArrowLeft } from 'lucide-react';
+import { FileVideo, Youtube, Mic, Loader2, Check, Copy, Download, Sparkles, Globe, X, Clock, CheckCircle, AlertCircle, FileAudio, ArrowLeft, List, Archive, Upload, Link } from 'lucide-react';
+import JSZip from 'jszip';
 import toast from 'react-hot-toast';
+import { useTranscriptionStore, TranscriptionJob } from '../stores/transcriptionStore';
 
 // Check if we're in Tauri context
 const isTauri = () => {
@@ -33,185 +34,45 @@ const platforms = [
 ];
 
 const transcriptionMethods = [
-  { id: 'native', name: 'Native Captions', description: 'Extract existing subtitles (faster)', available: ['youtube'] },
-  { id: 'whisper', name: 'Whisper AI', description: 'Advanced AI transcription (more accurate)', available: ['youtube', 'tiktok', 'video', 'universal'] },
+  { id: 'native', name: 'Native Captions', description: 'Extract existing subtitles · YouTube only', available: ['youtube'] },
+  { id: 'whisper', name: 'Whisper AI', description: 'OpenAI · 99 languages · multilingual', available: ['youtube', 'tiktok', 'video', 'universal'] },
 ];
-
-interface TranscriptionJob {
-  id: string;
-  platform: string;
-  url?: string;
-  fileName?: string;
-  filePath?: string;
-  fileSize?: number;
-  status: 'queued' | 'processing' | 'completed' | 'error';
-  statusMessage?: string;
-  statusIcon?: any;
-  transcription?: string;
-  videoInfo?: any;
-  error?: string;
-  startTime: Date;
-  endTime?: Date;
-}
 
 export const TranscriptionTool: React.FC<{ onBack: () => void }> = ({ onBack }) => {
   const [selectedPlatform, setSelectedPlatform] = useState('youtube');
   const [url, setUrl] = useState('');
+  const [bulkUrls, setBulkUrls] = useState('');
+  const [bulkMode, setBulkMode] = useState(false);
   const [files, setFiles] = useState<{path: string, name: string, size?: number}[]>([]);
-  const [method, setMethod] = useState('whisper');
-  const [jobs, setJobs] = useState<TranscriptionJob[]>([]);
+  const [method, setMethod] = useState<'whisper' | 'native'>('whisper');
   const [activeJobId, setActiveJobId] = useState<string | null>(null);
-  
+
+  // Jobs live in the Zustand store so they survive navigation (back button)
+  const jobs = useTranscriptionStore((s) => s.jobs);
+  const enqueueJob = useTranscriptionStore((s) => s.enqueueJob);
+  const storeRemoveJob = useTranscriptionStore((s) => s.removeJob);
 
   const generateJobId = () => `job-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
 
-  const processTranscription = async (job: TranscriptionJob) => {
-    // Update job status to processing
-    setJobs(prev => prev.map(j => 
-      j.id === job.id ? { ...j, status: 'processing', statusMessage: 'Starting...' } : j
-    ));
-
-    // Set up status update intervals for realistic progress feedback
-    const statusUpdates: { [key: string]: { message: string; icon: any }[] } = {
-      video: [
-        { message: 'Uploading file...', icon: Upload },
-        { message: 'Extracting audio track...', icon: Headphones },
-        { message: 'Processing with Whisper AI...', icon: Brain },
-        { message: 'Analyzing speech patterns...', icon: Activity },
-        { message: 'Generating transcript...', icon: FileText }
-      ],
-      youtube: method === 'native' ? [
-        { message: 'Connecting to YouTube...', icon: Youtube },
-        { message: 'Fetching video metadata...', icon: Cloud },
-        { message: 'Extracting captions...', icon: FileText },
-        { message: 'Processing subtitles...', icon: Settings }
-      ] : [
-        { message: 'Connecting to YouTube...', icon: Youtube },
-        { message: 'Downloading audio stream...', icon: Cloud },
-        { message: 'Converting audio format...', icon: Headphones },
-        { message: 'Processing with Whisper AI...', icon: Brain },
-        { message: 'Generating transcript...', icon: FileText }
-      ],
-      tiktok: [
-        { message: 'Connecting to TikTok...', icon: TikTokIcon },
-        { message: 'Downloading video...', icon: Cloud },
-        { message: 'Extracting audio track...', icon: Headphones },
-        { message: 'Processing with Whisper AI...', icon: Brain },
-        { message: 'Generating transcript...', icon: FileText }
-      ],
-      universal: [
-        { message: 'Analyzing URL...', icon: Link },
-        { message: 'Downloading media...', icon: Cloud },
-        { message: 'Extracting audio track...', icon: Headphones },
-        { message: 'Processing with Whisper AI...', icon: Brain },
-        { message: 'Generating transcript...', icon: FileText }
-      ]
-    };
-
-    const messages = statusUpdates[job.platform] || statusUpdates.universal;
-    let messageIndex = 0;
-
-    // Update status messages at intervals
-    const statusInterval = setInterval(() => {
-      if (messageIndex < messages.length) {
-        const current = messages[messageIndex];
-        setJobs(prev => prev.map(j => 
-          j.id === job.id && j.status === 'processing' 
-            ? { ...j, statusMessage: current.message, statusIcon: current.icon } 
-            : j
-        ));
-        messageIndex++;
-      }
-    }, 2500); // Update every 2.5 seconds
-
-    try {
-      // Call the actual backend API
-      let result: any;
-      
-      if (!isTauri()) {
-        throw new Error('Transcription requires the desktop app. Please use Tauri.');
-      }
-      
-      if (job.platform === 'video' && job.filePath) {
-        // Transcribe local file
-        console.log('Job object:', job);
-        console.log('Invoking transcribe_file with path:', job.filePath);
-        console.log('Sending params:', { filePath: job.filePath });
-        result = await invoke('transcribe_file', { filePath: job.filePath });
-        console.log('Transcription result:', result);
-      } else if (job.platform === 'youtube') {
-        // Transcribe YouTube with appropriate method
-        if (method === 'native') {
-          result = await invoke('transcribe_youtube', { url: job.url });
-        } else {
-          // Use Whisper - treat as universal URL
-          result = await invoke('transcribe_universal', { url: job.url });
-        }
-      } else if (job.platform === 'tiktok') {
-        // Transcribe TikTok
-        result = await invoke('transcribe_tiktok', { url: job.url });
-      } else if (job.platform === 'universal') {
-        // Transcribe any URL
-        result = await invoke('transcribe_universal', { url: job.url });
-      }
-      
-      // Clear status interval
-      clearInterval(statusInterval);
-      
-      // Update job with results
-      const transcriptionText = typeof result === 'string' ? result : (result as any).transcript || (result as any).transcription || (result as any).text || '';
-      setJobs(prev => prev.map(j => 
-        j.id === job.id 
-          ? {
-              ...j,
-              status: 'completed',
-              statusMessage: 'Completed',
-              transcription: transcriptionText,
-              videoInfo: typeof result === 'object' ? {
-                title: (result as any).title || (result as any).videoTitle || 'Video',
-                duration: (result as any).duration || '',
-                ...(result as any)
-              } : { title: job.fileName || 'Video' },
-              endTime: new Date()
-            }
-          : j
-      ));
-      
-      console.log(`Transcription completed for ${job.fileName || job.url}`);
-      toast.success(`Transcribed: ${job.fileName || job.url}`);
-    } catch (error: any) {
-      // Clear status interval on error
-      clearInterval(statusInterval);
-      
-      // Update job with error
-      setJobs(prev => prev.map(j => 
-        j.id === job.id 
-          ? {
-              ...j,
-              status: 'error',
-              error: error.message || 'Failed to transcribe',
-              endTime: new Date()
-            }
-          : j
-      ));
-      
-      console.error('Transcription error:', error);
-      console.error('Error message:', error.message);
-      console.error('Job that failed:', job);
-      toast.error(`Failed: ${error.message || 'Unknown error'}`);
-    }
+  const parseBulkUrls = (): string[] => {
+    return bulkUrls
+      .split('\n')
+      .map(u => u.trim())
+      .filter(u => u.length > 0 && (u.startsWith('http://') || u.startsWith('https://')));
   };
 
   const addTranscriptionJobs = async () => {
     if (selectedPlatform === 'video' && files.length === 0) {
       return;
     }
-    if (selectedPlatform !== 'video' && !url) {
+    if (selectedPlatform !== 'video' && !bulkMode && !url) {
+      return;
+    }
+    if (selectedPlatform !== 'video' && bulkMode && parseBulkUrls().length === 0) {
       return;
     }
 
     if (selectedPlatform === 'video') {
-      // Create a job for each file
       const newJobs: TranscriptionJob[] = files.map(file => ({
         id: generateJobId(),
         platform: selectedPlatform,
@@ -221,19 +82,27 @@ export const TranscriptionTool: React.FC<{ onBack: () => void }> = ({ onBack }) 
         status: 'queued' as const,
         statusMessage: 'Waiting...',
         startTime: new Date(),
+        method,
       }));
 
-      setJobs(prev => [...prev, ...newJobs]);
-      
-      // Start processing each file
-      newJobs.forEach((job) => {
-        processTranscription(job);
-      });
-
-      // Clear files
+      newJobs.forEach((job) => enqueueJob(job));
       setFiles([]);
+    } else if (bulkMode) {
+      const urls = parseBulkUrls();
+      const newJobs: TranscriptionJob[] = urls.map(u => ({
+        id: generateJobId(),
+        platform: selectedPlatform,
+        url: u,
+        status: 'queued' as const,
+        statusMessage: 'Waiting...',
+        startTime: new Date(),
+        method,
+      }));
+
+      toast.success(`Added ${urls.length} URLs to queue`);
+      newJobs.forEach((job) => enqueueJob(job));
+      setBulkUrls('');
     } else {
-      // Process single URL
       const newJob: TranscriptionJob = {
         id: generateJobId(),
         platform: selectedPlatform,
@@ -241,12 +110,10 @@ export const TranscriptionTool: React.FC<{ onBack: () => void }> = ({ onBack }) 
         status: 'queued',
         statusMessage: 'Waiting...',
         startTime: new Date(),
+        method,
       };
 
-      setJobs(prev => [...prev, newJob]);
-      processTranscription(newJob);
-      
-      // Clear URL
+      enqueueJob(newJob);
       setUrl('');
     }
   };
@@ -302,8 +169,37 @@ export const TranscriptionTool: React.FC<{ onBack: () => void }> = ({ onBack }) 
     toast.success('Downloaded transcription!');
   };
 
+  const downloadAllTranscriptions = async () => {
+    const completedJobs = jobs.filter(j => j.status === 'completed' && j.transcription);
+    if (completedJobs.length === 0) return;
+
+    const zip = new JSZip();
+    const folder = zip.folder('transcriptions');
+
+    completedJobs.forEach((job, index) => {
+      const name = job.videoInfo?.title
+        || job.fileName
+        || job.url?.replace(/[^a-z0-9]/gi, '-')
+        || `transcription-${index + 1}`;
+      // Sanitize filename
+      const safeName = name.replace(/[<>:"/\\|?*]/g, '-').substring(0, 100);
+      folder!.file(`${String(index + 1).padStart(2, '0')}_${safeName}.txt`, job.transcription!);
+    });
+
+    const blob = await zip.generateAsync({ type: 'blob' });
+    const url = window.URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `transcriptions-${new Date().toISOString().slice(0, 10)}.zip`;
+    document.body.appendChild(a);
+    a.click();
+    window.URL.revokeObjectURL(url);
+    document.body.removeChild(a);
+    toast.success(`Downloaded ${completedJobs.length} transcriptions as ZIP!`);
+  };
+
   const removeJob = (jobId: string) => {
-    setJobs(prev => prev.filter(j => j.id !== jobId));
+    storeRemoveJob(jobId);
     if (activeJobId === jobId) {
       setActiveJobId(null);
     }
@@ -412,6 +308,36 @@ export const TranscriptionTool: React.FC<{ onBack: () => void }> = ({ onBack }) 
               })}
             </div>
 
+            {/* Bulk Mode Toggle (for non-video platforms) */}
+            {selectedPlatform !== 'video' && (
+              <div className="flex items-center gap-2 mb-3">
+                <button
+                  onClick={() => setBulkMode(false)}
+                  className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg border-2 transition-all duration-300 text-xs ${
+                    !bulkMode
+                      ? 'border-orange-500 bg-orange-100 shadow-sm'
+                      : 'border-orange-200 hover:border-orange-300'
+                  }`}
+                  style={{ fontFamily: 'Bebas Neue, cursive', letterSpacing: '1px' }}
+                >
+                  <Link className="h-3 w-3" style={{ color: !bulkMode ? '#ea580c' : '#9ca3af' }} />
+                  <span style={{ color: !bulkMode ? '#ea580c' : '#9ca3af' }}>SINGLE</span>
+                </button>
+                <button
+                  onClick={() => setBulkMode(true)}
+                  className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg border-2 transition-all duration-300 text-xs ${
+                    bulkMode
+                      ? 'border-orange-500 bg-orange-100 shadow-sm'
+                      : 'border-orange-200 hover:border-orange-300'
+                  }`}
+                  style={{ fontFamily: 'Bebas Neue, cursive', letterSpacing: '1px' }}
+                >
+                  <List className="h-3 w-3" style={{ color: bulkMode ? '#ea580c' : '#9ca3af' }} />
+                  <span style={{ color: bulkMode ? '#ea580c' : '#9ca3af' }}>BULK</span>
+                </button>
+              </div>
+            )}
+
             {/* Input Field */}
             {selectedPlatform === 'video' ? (
               <div className="mb-4">
@@ -451,6 +377,23 @@ export const TranscriptionTool: React.FC<{ onBack: () => void }> = ({ onBack }) 
                   </div>
                 )}
               </div>
+            ) : bulkMode ? (
+              <div className="mb-4">
+                <label className="block text-xs font-black text-orange-800 uppercase tracking-wider mb-2" style={{ fontFamily: 'Bebas Neue, cursive' }}>
+                  Paste URLs (one per line)
+                  {parseBulkUrls().length > 0 && (
+                    <span className="ml-2 text-red-600">({parseBulkUrls().length} valid)</span>
+                  )}
+                </label>
+                <textarea
+                  value={bulkUrls}
+                  onChange={(e) => setBulkUrls(e.target.value)}
+                  placeholder={"https://youtube.com/watch?v=abc\nhttps://youtube.com/watch?v=def\nhttps://tiktok.com/@user/video/123"}
+                  rows={5}
+                  className="w-full px-4 py-3 bg-gradient-to-r from-white to-orange-50 border-2 border-orange-300 rounded-xl text-gray-800 font-bold placeholder-orange-300 focus:border-orange-500 focus:outline-none focus:shadow-lg transition-all duration-300 resize-none"
+                  style={{ fontFamily: 'Space Mono, monospace', fontSize: '12px', lineHeight: '1.6' }}
+                />
+              </div>
             ) : (
               <div className="mb-4">
                 <label className="block text-xs font-black text-orange-800 uppercase tracking-wider mb-2" style={{ fontFamily: 'Bebas Neue, cursive' }}>Video URL</label>
@@ -476,30 +419,30 @@ export const TranscriptionTool: React.FC<{ onBack: () => void }> = ({ onBack }) 
                 {transcriptionMethods.map((m) => {
                   const isAvailable = m.available.includes(selectedPlatform);
                   const isSelected = method === m.id;
-                  
+
                   return (
                     <button
                       key={m.id}
-                      onClick={() => isAvailable && setMethod(m.id)}
+                      onClick={() => isAvailable && setMethod(m.id as 'whisper' | 'native')}
                       disabled={!isAvailable}
                       className={`
                         w-full p-3 rounded-xl border-2 text-left transition-all duration-300 transform
-                        ${!isAvailable 
-                          ? 'border-gray-200 bg-gray-50 opacity-50 cursor-not-allowed' 
-                          : isSelected 
-                            ? 'border-orange-500 scale-[1.02] shadow-md' 
+                        ${!isAvailable
+                          ? 'border-gray-200 bg-gray-50 opacity-50 cursor-not-allowed'
+                          : isSelected
+                            ? 'border-orange-500 scale-[1.02] shadow-md'
                             : 'border-orange-200 hover:border-orange-400 hover:scale-[1.01] hover:shadow-sm'
                         }
                       `}
                       style={{
-                        background: !isAvailable ? '#f9fafb' : isSelected 
-                          ? 'linear-gradient(135deg, #fed7aa, #fb923c)' 
+                        background: !isAvailable ? '#f9fafb' : isSelected
+                          ? 'linear-gradient(135deg, #fed7aa, #fb923c)'
                           : 'linear-gradient(135deg, #fff5eb, #ffedd5)'
                       }}
                     >
                       <div className="flex items-center justify-between">
                         <div>
-                          <div className={`text-sm font-black ${isSelected ? 'text-orange-900' : 'text-orange-700'}`} 
+                          <div className={`text-sm font-black ${isSelected ? 'text-orange-900' : 'text-orange-700'}`}
                                style={{ fontFamily: 'Bebas Neue, cursive', letterSpacing: '1px' }}>
                             {m.name}
                           </div>
@@ -519,11 +462,17 @@ export const TranscriptionTool: React.FC<{ onBack: () => void }> = ({ onBack }) 
             {/* Add to Queue Button */}
             <button
               onClick={addTranscriptionJobs}
-              disabled={selectedPlatform === 'video' ? files.length === 0 : !url}
+              disabled={
+                selectedPlatform === 'video'
+                  ? files.length === 0
+                  : bulkMode
+                    ? parseBulkUrls().length === 0
+                    : !url
+              }
               className={`
                 w-full py-4 px-6 rounded-xl font-black text-lg
                 transition-all duration-300 transform shadow-lg
-                ${(selectedPlatform === 'video' ? files.length === 0 : !url)
+                ${(selectedPlatform === 'video' ? files.length === 0 : bulkMode ? parseBulkUrls().length === 0 : !url)
                   ? 'bg-gray-200 text-gray-400 cursor-not-allowed'
                   : 'bg-gradient-to-r from-orange-500 to-red-500 text-white hover:from-orange-600 hover:to-red-600 hover:scale-105 hover:shadow-xl active:scale-95'
                 }
@@ -533,9 +482,11 @@ export const TranscriptionTool: React.FC<{ onBack: () => void }> = ({ onBack }) 
               <div className="flex items-center justify-center gap-2">
                 <Sparkles className="w-5 h-5" />
                 <span>
-                  {selectedPlatform === 'video' && files.length > 1 
+                  {selectedPlatform === 'video' && files.length > 1
                     ? `Add ${files.length} Files to Queue`
-                    : 'Add to Queue'
+                    : bulkMode && parseBulkUrls().length > 0
+                      ? `Add ${parseBulkUrls().length} URLs to Queue`
+                      : 'Add to Queue'
                   }
                 </span>
               </div>
@@ -544,8 +495,20 @@ export const TranscriptionTool: React.FC<{ onBack: () => void }> = ({ onBack }) 
 
           {/* Queue Section */}
           <div className="bg-gradient-to-br from-amber-50 to-orange-50 backdrop-blur-xl border-2 border-amber-300 rounded-3xl p-6">
-            <h3 className="text-lg font-black text-gray-800 mb-3" style={{ fontFamily: 'Archivo Black, sans-serif' }}>QUEUE</h3>
-            
+            <div className="flex items-center justify-between mb-3">
+              <h3 className="text-lg font-black text-gray-800" style={{ fontFamily: 'Archivo Black, sans-serif' }}>QUEUE</h3>
+              {jobs.filter(j => j.status === 'completed' && j.transcription).length >= 2 && (
+                <button
+                  onClick={downloadAllTranscriptions}
+                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-gradient-to-r from-orange-500 to-red-500 text-white hover:from-orange-600 hover:to-red-600 transition-all duration-300 transform hover:scale-105 shadow-md"
+                  title="Download all transcriptions as ZIP"
+                >
+                  <Archive className="w-3.5 h-3.5" />
+                  <span className="text-xs font-black uppercase" style={{ fontFamily: 'Bebas Neue, cursive', letterSpacing: '1px' }}>Download All</span>
+                </button>
+              )}
+            </div>
+
             {jobs.length === 0 ? (
               <div className="h-[400px] flex items-center justify-center">
                 <div className="text-center">
@@ -580,11 +543,7 @@ export const TranscriptionTool: React.FC<{ onBack: () => void }> = ({ onBack }) 
                         <div className="flex items-center gap-2 mt-1">
                           {job.status === 'processing' && (
                             <>
-                              {job.statusIcon ? (
-                                <job.statusIcon className="w-3 h-3 text-orange-500 animate-pulse" />
-                              ) : (
-                                <Loader2 className="w-3 h-3 animate-spin text-orange-500" />
-                              )}
+                              <Loader2 className="w-3 h-3 animate-spin text-orange-500" />
                               <span className="text-xs text-orange-600">{job.statusMessage || 'Processing...'}</span>
                             </>
                           )}
@@ -648,11 +607,7 @@ export const TranscriptionTool: React.FC<{ onBack: () => void }> = ({ onBack }) 
             ) : activeJob.status === 'processing' ? (
               <div className="h-96 flex items-center justify-center">
                 <div className="text-center">
-                  {activeJob.statusIcon ? (
-                    <activeJob.statusIcon className="w-12 h-12 text-orange-500 animate-pulse mx-auto mb-3" />
-                  ) : (
-                    <Loader2 className="w-12 h-12 text-orange-500 animate-spin mx-auto mb-3" />
-                  )}
+                  <Loader2 className="w-12 h-12 text-orange-500 animate-spin mx-auto mb-3" />
                   <p className="text-orange-600">{activeJob.statusMessage || 'Processing...'}</p>
                 </div>
               </div>

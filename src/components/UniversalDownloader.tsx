@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { invoke } from '@tauri-apps/api/core';
-import { Download, Loader2, Globe2, ArrowLeft } from 'lucide-react';
+import { Download, Loader2, Globe2, ArrowLeft, List, Link } from 'lucide-react';
 import toast from 'react-hot-toast';
 
 // Platform Icons as SVG Components
@@ -51,53 +51,57 @@ const platforms = [
 
 export const UniversalDownloader: React.FC<{ onBack: () => void }> = ({ onBack }) => {
   const [url, setUrl] = useState('');
+  const [bulkUrls, setBulkUrls] = useState('');
   const [downloading, setDownloading] = useState(false);
-  // Removed progress state - using ActiveDownloads widget instead
+  const [bulkMode, setBulkMode] = useState(false);
+  const [bulkProgress, setBulkProgress] = useState({ total: 0, started: 0 });
   const [detectedPlatform, setDetectedPlatform] = useState<string>('');
 
-  // Progress is now handled by ActiveDownloads widget
+  const detectPlatform = (inputUrl: string): string => {
+    if (inputUrl.includes('instagram.com')) return 'instagram';
+    if (inputUrl.includes('tiktok.com')) return 'tiktok';
+    if (inputUrl.includes('twitter.com') || inputUrl.includes('x.com')) return 'twitter';
+    if (inputUrl.includes('facebook.com') || inputUrl.includes('fb.')) return 'facebook';
+    if (inputUrl.includes('reddit.com')) return 'reddit';
+    if (inputUrl.includes('pinterest.com')) return 'pinterest';
+    return '';
+  };
 
   useEffect(() => {
-    // Detect platform from URL
     if (url) {
-      if (url.includes('instagram.com')) setDetectedPlatform('instagram');
-      else if (url.includes('tiktok.com')) setDetectedPlatform('tiktok');
-      else if (url.includes('twitter.com') || url.includes('x.com')) setDetectedPlatform('twitter');
-      else if (url.includes('facebook.com') || url.includes('fb.')) setDetectedPlatform('facebook');
-      else if (url.includes('reddit.com')) setDetectedPlatform('reddit');
-      else if (url.includes('pinterest.com')) setDetectedPlatform('pinterest');
-      else setDetectedPlatform('');
+      setDetectedPlatform(detectPlatform(url));
     } else {
       setDetectedPlatform('');
     }
   }, [url]);
 
+  const parseBulkUrls = (): string[] => {
+    return bulkUrls
+      .split('\n')
+      .map(u => u.trim())
+      .filter(u => u.length > 0 && (u.startsWith('http://') || u.startsWith('https://')));
+  };
+
   const downloadContent = async () => {
     if (!url) return;
-    
+
     setDownloading(true);
-    
+
     try {
       if (!window.__TAURI__) {
-        toast('Downloads require the desktop app', {
-          icon: 'ℹ️',
-        });
+        toast('Downloads require the desktop app', { icon: 'ℹ️' });
         setDownloading(false);
         return;
       }
-      
-      // Start download in background (fire and forget)
-      invoke<string>('download_universal', { 
+
+      invoke<string>('download_universal', {
         url,
         siteType: detectedPlatform || undefined
-      }).then(() => {
-        // Download completed silently
-      }).catch(error => {
+      }).then(() => {}).catch(error => {
         console.error('Download failed:', error);
         toast.error(`Download failed: ${error}`);
       });
-      
-      // Keep downloading state for 2 seconds to show button feedback
+
       setTimeout(() => {
         setUrl('');
         setDetectedPlatform('');
@@ -108,6 +112,45 @@ export const UniversalDownloader: React.FC<{ onBack: () => void }> = ({ onBack }
       toast.error(`Failed to start download: ${error}`);
       setDownloading(false);
     }
+  };
+
+  const downloadBulk = async () => {
+    const urls = parseBulkUrls();
+    if (urls.length === 0) return;
+
+    if (!window.__TAURI__) {
+      toast('Downloads require the desktop app', { icon: 'ℹ️' });
+      return;
+    }
+
+    setDownloading(true);
+    setBulkProgress({ total: urls.length, started: 0 });
+    toast.success(`Starting ${urls.length} downloads...`);
+
+    for (let i = 0; i < urls.length; i++) {
+      const u = urls[i];
+      const platform = detectPlatform(u);
+      setBulkProgress({ total: urls.length, started: i + 1 });
+
+      invoke<string>('download_universal', {
+        url: u,
+        siteType: platform || undefined
+      }).then(() => {}).catch(error => {
+        console.error(`Download failed for ${u}:`, error);
+        toast.error(`Failed: ${u.substring(0, 40)}...`);
+      });
+
+      // Small delay between starts to avoid overwhelming
+      if (i < urls.length - 1) {
+        await new Promise(r => setTimeout(r, 500));
+      }
+    }
+
+    setTimeout(() => {
+      setBulkUrls('');
+      setDownloading(false);
+      setBulkProgress({ total: 0, started: 0 });
+    }, 2000);
   };
 
   const getPlatformInfo = () => {
@@ -169,59 +212,122 @@ export const UniversalDownloader: React.FC<{ onBack: () => void }> = ({ onBack }
             })}
           </div>
 
+          {/* Mode Toggle */}
+          <div className="flex items-center gap-2 mb-6">
+            <button
+              onClick={() => setBulkMode(false)}
+              className={`flex items-center gap-2 px-4 py-2 rounded-xl border-2 transition-all duration-300 ${
+                !bulkMode
+                  ? 'border-orange-400 bg-orange-50 shadow-md'
+                  : 'border-gray-200 hover:border-orange-200'
+              }`}
+              style={{ fontFamily: 'Bebas Neue, sans-serif', letterSpacing: '1px' }}
+            >
+              <Link className="h-4 w-4" style={{ color: !bulkMode ? '#ea580c' : '#9ca3af' }} />
+              <span style={{ color: !bulkMode ? '#ea580c' : '#6B7280' }}>SINGLE</span>
+            </button>
+            <button
+              onClick={() => setBulkMode(true)}
+              className={`flex items-center gap-2 px-4 py-2 rounded-xl border-2 transition-all duration-300 ${
+                bulkMode
+                  ? 'border-orange-400 bg-orange-50 shadow-md'
+                  : 'border-gray-200 hover:border-orange-200'
+              }`}
+              style={{ fontFamily: 'Bebas Neue, sans-serif', letterSpacing: '1px' }}
+            >
+              <List className="h-4 w-4" style={{ color: bulkMode ? '#ea580c' : '#9ca3af' }} />
+              <span style={{ color: bulkMode ? '#ea580c' : '#6B7280' }}>BULK</span>
+            </button>
+          </div>
+
           {/* URL Input */}
           <div className="space-y-6">
-            <div>
-              <label className="block text-sm font-bold mb-2" style={{ fontFamily: 'Bebas Neue, sans-serif', color: '#6B7280' }}>
-                PASTE URL HERE
-              </label>
-              <div className="relative">
-                <input
-                  type="text"
-                  value={url}
-                  onChange={(e) => setUrl(e.target.value)}
-                  placeholder="https://instagram.com/p/..."
-                  className="w-full px-4 py-3 pr-12 rounded-xl border-2 border-orange-200 focus:border-orange-400 focus:outline-none transition-colors"
-                  style={{ fontFamily: 'Space Mono, monospace' }}
+            {bulkMode ? (
+              <div>
+                <label className="block text-sm font-bold mb-2" style={{ fontFamily: 'Bebas Neue, sans-serif', color: '#6B7280' }}>
+                  PASTE URLS (ONE PER LINE)
+                </label>
+                <textarea
+                  value={bulkUrls}
+                  onChange={(e) => setBulkUrls(e.target.value)}
+                  placeholder={"https://instagram.com/p/abc123\nhttps://tiktok.com/@user/video/123\nhttps://x.com/user/status/456\nhttps://reddit.com/r/sub/comments/..."}
+                  rows={6}
+                  className="w-full px-4 py-3 rounded-xl border-2 border-orange-200 focus:border-orange-400 focus:outline-none transition-colors resize-none"
+                  style={{ fontFamily: 'Space Mono, monospace', fontSize: '13px', lineHeight: '1.6' }}
                 />
-                {platformInfo && (
-                  <div className="absolute right-3 top-1/2 -translate-y-1/2" style={{ color: platformInfo.color }}>
-                    <platformInfo.icon />
+                {parseBulkUrls().length > 0 && (
+                  <p className="text-sm mt-2" style={{ fontFamily: 'Space Mono, monospace', color: '#ea580c' }}>
+                    {parseBulkUrls().length} valid URL{parseBulkUrls().length !== 1 ? 's' : ''} detected
+                  </p>
+                )}
+                {bulkProgress.total > 0 && (
+                  <div className="mt-3">
+                    <div className="flex justify-between text-xs mb-1" style={{ fontFamily: 'Space Mono, monospace', color: '#ea580c' }}>
+                      <span>Starting downloads...</span>
+                      <span>{bulkProgress.started}/{bulkProgress.total}</span>
+                    </div>
+                    <div className="h-2 bg-orange-100 rounded-full overflow-hidden">
+                      <div
+                        className="h-full bg-gradient-to-r from-orange-400 to-orange-500 transition-all duration-300"
+                        style={{ width: `${(bulkProgress.started / bulkProgress.total) * 100}%` }}
+                      />
+                    </div>
                   </div>
                 )}
               </div>
-              {platformInfo && (
-                <p className="text-sm mt-2" style={{ fontFamily: 'Space Mono, monospace', color: platformInfo.color }}>
-                  Detected: {platformInfo.name}
-                </p>
-              )}
-            </div>
+            ) : (
+              <div>
+                <label className="block text-sm font-bold mb-2" style={{ fontFamily: 'Bebas Neue, sans-serif', color: '#6B7280' }}>
+                  PASTE URL HERE
+                </label>
+                <div className="relative">
+                  <input
+                    type="text"
+                    value={url}
+                    onChange={(e) => setUrl(e.target.value)}
+                    placeholder="https://instagram.com/p/..."
+                    className="w-full px-4 py-3 pr-12 rounded-xl border-2 border-orange-200 focus:border-orange-400 focus:outline-none transition-colors"
+                    style={{ fontFamily: 'Space Mono, monospace' }}
+                  />
+                  {platformInfo && (
+                    <div className="absolute right-3 top-1/2 -translate-y-1/2" style={{ color: platformInfo.color }}>
+                      <platformInfo.icon />
+                    </div>
+                  )}
+                </div>
+                {platformInfo && (
+                  <p className="text-sm mt-2" style={{ fontFamily: 'Space Mono, monospace', color: platformInfo.color }}>
+                    Detected: {platformInfo.name}
+                  </p>
+                )}
+              </div>
+            )}
 
             {/* Download Button */}
             <button
-              onClick={downloadContent}
-              disabled={downloading || !url}
+              onClick={bulkMode ? downloadBulk : downloadContent}
+              disabled={downloading || (bulkMode ? parseBulkUrls().length === 0 : !url)}
               className="w-full py-4 rounded-xl font-bold transition-all duration-300 flex items-center justify-center gap-3 shadow-lg hover:shadow-xl disabled:opacity-50 group"
               style={{
                 fontFamily: 'Bungee, cursive',
-                background: downloading || !url
+                background: downloading || (bulkMode ? parseBulkUrls().length === 0 : !url)
                   ? '#e5e7eb'
-                  : platformInfo
+                  : !bulkMode && platformInfo
                     ? `linear-gradient(135deg, ${platformInfo.color}99 0%, ${platformInfo.color} 100%)`
                     : 'linear-gradient(135deg, #fb923c 0%, #f97316 100%)',
-                color: downloading || !url ? '#9ca3af' : 'white',
+                color: downloading || (bulkMode ? parseBulkUrls().length === 0 : !url) ? '#9ca3af' : 'white',
                 fontSize: '18px'
               }}
             >
               {downloading ? (
                 <>
                   <Loader2 className="h-6 w-6 animate-spin" />
-                  Downloading...
+                  {bulkMode ? `Downloading ${bulkProgress.started}/${bulkProgress.total}...` : 'Downloading...'}
                 </>
               ) : (
                 <>
                   <Download className="h-6 w-6 group-hover:animate-bounce" />
-                  GRAB IT!
+                  {bulkMode ? `GRAB ALL ${parseBulkUrls().length > 0 ? `(${parseBulkUrls().length})` : ''}` : 'GRAB IT!'}
                 </>
               )}
             </button>
