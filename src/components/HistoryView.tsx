@@ -12,6 +12,7 @@ import {
   Trash,
 } from 'lucide-react';
 import { invoke } from '@tauri-apps/api/core';
+import { ask } from '@tauri-apps/plugin-dialog';
 import toast from 'react-hot-toast';
 
 interface HistoryEntry {
@@ -227,11 +228,33 @@ export const HistoryView: React.FC<HistoryViewProps> = ({ onClose, scope = 'all'
   };
 
   const handleClearAll = async () => {
-    if (!confirm('Clear all history? Files on disk are not deleted.')) return;
+    // Per-tool views clear ONLY entries that belong to that tool. The home
+    // (scope='all') view clears everything. Uses the native dialog plugin
+    // because window.confirm() does not always render inside the Tauri
+    // webview on macOS.
+    const scopeLabel =
+      scope === 'youtube'    ? 'YouTube history'    :
+      scope === 'universal'  ? 'Universal history'  :
+      scope === 'transcribe' ? 'Transcription history' :
+      'all history';
+    const confirmed = await ask(
+      `Clear ${scopeLabel}? Files on disk are not deleted.`,
+      { title: 'Clear history', kind: 'warning' }
+    );
+    if (!confirmed) return;
     try {
-      await invoke('clear_history');
-      setEntries([]);
-      toast.success('History cleared');
+      if (scope === 'all') {
+        await invoke('clear_history');
+        setEntries([]);
+      } else {
+        // Delete only the entries that belong to this scope.
+        const idsToRemove = scopedEntries.map((e) => e.id);
+        await Promise.all(
+          idsToRemove.map((id) => invoke('delete_history_entry', { id }))
+        );
+        setEntries((prev) => prev.filter((e) => !idsToRemove.includes(e.id)));
+      }
+      toast.success(`${scopeLabel.charAt(0).toUpperCase() + scopeLabel.slice(1)} cleared`);
     } catch (e) {
       toast.error(`Clear failed: ${e}`);
     }
