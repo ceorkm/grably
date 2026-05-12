@@ -196,3 +196,8 @@ src-tauri/resources/*.dylib
 dist-staging/
 dmg-staging/
 Grably.app/
+
+# Auto-update release artifacts (regenerated each release, not source)
+Grably.app.tar.gz
+Grably.app.tar.gz.sig
+latest.json

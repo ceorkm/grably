@@ -20,7 +20,7 @@
       }
     ],
     "security": {
-      "csp": "default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; img-src 'self' data: https:; connect-src 'self' http://localhost:* ws://localhost:*; frame-src https://www.youtube.com https://youtube.com https://www.youtube-nocookie.com; media-src 'self' blob: https:"
+      "csp": "default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; img-src 'self' data: https:; connect-src 'self' http://localhost:* ws://localhost:* https://github.com https://*.githubusercontent.com https://objects.githubusercontent.com; frame-src https://www.youtube.com https://youtube.com https://www.youtube-nocookie.com; media-src 'self' blob: https:"
     }
   },
   "bundle": {
@@ -41,5 +41,14 @@
       "resources/deno"
     ]
   },
-  "plugins": {}
+  "plugins": {
+    "updater": {
+      "active": true,
+      "endpoints": [
+        "https://github.com/ceorkm/grably/releases/latest/download/latest.json"
+      ],
+      "dialog": false,
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDhEMjFFNjkwNjQ1MUY4RTAKUldUZytGRmtrT1loalVyWVFQaUUwUWIyRlZYZmlZNXp3QXdGbzVrblkrL0UrbnY0bUFRKzBFZU4K"
+    }
+  }
 }

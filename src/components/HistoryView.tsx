@@ -26,11 +26,58 @@ interface HistoryEntry {
   timestamp: number; // unix seconds
 }
 
+export type HistoryScope = 'all' | 'youtube' | 'universal' | 'transcribe';
+
 interface HistoryViewProps {
   onClose: () => void;
+  /**
+   * Restrict entries shown to one tool's activity.
+   * - 'all'        → everything (default, used by home History button)
+   * - 'youtube'    → downloads + transcriptions with siteType === 'youtube'
+   * - 'universal'  → downloads with siteType not in {'youtube','file'}
+   *                  (TikTok, Instagram, Twitter, etc.)
+   * - 'transcribe' → all transcriptions regardless of source
+   */
+  scope?: HistoryScope;
 }
 
 type Filter = 'all' | 'downloads' | 'transcriptions';
+
+const UNIVERSAL_SITE_TYPES = new Set([
+  'tiktok', 'instagram', 'twitter', 'facebook',
+  'reddit', 'pinterest', 'universal',
+]);
+
+const entryMatchesScope = (entry: HistoryEntry, scope: HistoryScope): boolean => {
+  if (scope === 'all') return true;
+  if (scope === 'transcribe') return entry.entryType === 'transcription';
+  if (scope === 'youtube') return entry.siteType === 'youtube';
+  if (scope === 'universal') {
+    if (entry.entryType !== 'download') return false;
+    const st = entry.siteType?.toLowerCase();
+    if (!st) return false;
+    return UNIVERSAL_SITE_TYPES.has(st);
+  }
+  return true;
+};
+
+const scopeTitle = (scope: HistoryScope): string => {
+  switch (scope) {
+    case 'youtube':    return 'YOUTUBE HISTORY';
+    case 'universal':  return 'UNIVERSAL HISTORY';
+    case 'transcribe': return 'TRANSCRIPTION HISTORY';
+    default:           return 'HISTORY';
+  }
+};
+
+const scopeSubtitle = (scope: HistoryScope): string => {
+  switch (scope) {
+    case 'youtube':    return 'Your YouTube downloads and transcriptions';
+    case 'universal':  return 'TikTok · Instagram · Twitter · all platforms';
+    case 'transcribe': return 'Every transcript you have generated';
+    default:           return 'All your downloads and transcriptions';
+  }
+};
 
 const formatBytes = (bytes?: number | null): string => {
   if (!bytes || bytes <= 0) return '';
@@ -74,10 +121,16 @@ const getHostFromUrl = (url: string): string => {
   }
 };
 
-export const HistoryView: React.FC<HistoryViewProps> = ({ onClose }) => {
+export const HistoryView: React.FC<HistoryViewProps> = ({ onClose, scope = 'all' }) => {
   const [entries, setEntries] = useState<HistoryEntry[]>([]);
   const [loading, setLoading] = useState(true);
-  const [filter, setFilter] = useState<Filter>('all');
+  // For a scoped view we hide the Transcripts chip when scope is 'youtube' or 'universal'
+  // and default the filter to whichever makes sense in that context.
+  const [filter, setFilter] = useState<Filter>(() => {
+    if (scope === 'transcribe') return 'transcriptions';
+    if (scope === 'universal') return 'downloads';
+    return 'all';
+  });
   const [viewingTranscript, setViewingTranscript] = useState<HistoryEntry | null>(null);
 
   const loadHistory = async () => {
@@ -97,11 +150,17 @@ export const HistoryView: React.FC<HistoryViewProps> = ({ onClose }) => {
     loadHistory();
   }, []);
 
+  // Apply per-page scope first, then the user's chip filter on top.
+  const scopedEntries = useMemo(
+    () => entries.filter((e) => entryMatchesScope(e, scope)),
+    [entries, scope]
+  );
+
   const filtered = useMemo(() => {
-    if (filter === 'all') return entries;
-    if (filter === 'downloads') return entries.filter((e) => e.entryType === 'download');
-    return entries.filter((e) => e.entryType === 'transcription');
-  }, [entries, filter]);
+    if (filter === 'all') return scopedEntries;
+    if (filter === 'downloads') return scopedEntries.filter((e) => e.entryType === 'download');
+    return scopedEntries.filter((e) => e.entryType === 'transcription');
+  }, [scopedEntries, filter]);
 
   const grouped = useMemo(() => {
     const map: Record<string, HistoryEntry[]> = {};
@@ -178,14 +237,31 @@ export const HistoryView: React.FC<HistoryViewProps> = ({ onClose }) => {
     }
   };
 
+  // Counts reflect the scoped pool so each per-page view shows numbers for that tool.
   const counts = useMemo(
     () => ({
-      all: entries.length,
-      downloads: entries.filter((e) => e.entryType === 'download').length,
-      transcriptions: entries.filter((e) => e.entryType === 'transcription').length,
+      all: scopedEntries.length,
+      downloads: scopedEntries.filter((e) => e.entryType === 'download').length,
+      transcriptions: scopedEntries.filter((e) => e.entryType === 'transcription').length,
     }),
-    [entries]
+    [scopedEntries]
   );
+
+  // For a Transcribe-only scope, hide the Downloads chip; for Universal/YouTube
+  // scopes that include both downloads and transcripts, keep all chips visible.
+  const visibleFilters: [Filter, string, number][] = (() => {
+    if (scope === 'transcribe') {
+      return [['transcriptions', 'TRANSCRIPTS', counts.transcriptions]];
+    }
+    if (scope === 'universal') {
+      return [['downloads', 'DOWNLOADS', counts.downloads]];
+    }
+    return [
+      ['all', 'ALL', counts.all],
+      ['downloads', 'DOWNLOADS', counts.downloads],
+      ['transcriptions', 'TRANSCRIPTS', counts.transcriptions],
+    ];
+  })();
 
   return (
     <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
@@ -197,13 +273,13 @@ export const HistoryView: React.FC<HistoryViewProps> = ({ onClose }) => {
               className="text-3xl text-gray-900 leading-none"
               style={{ fontFamily: 'Bebas Neue, sans-serif', letterSpacing: '1px' }}
             >
-              HISTORY
+              {scopeTitle(scope)}
             </h2>
             <p
               className="text-gray-600 mt-1 text-sm"
               style={{ fontFamily: 'Courier Prime, monospace' }}
             >
-              All your downloads and transcriptions
+              {scopeSubtitle(scope)}
             </p>
           </div>
           <div className="flex items-center gap-2">
@@ -229,13 +305,7 @@ export const HistoryView: React.FC<HistoryViewProps> = ({ onClose }) => {
 
         {/* Filter chips */}
         <div className="px-6 py-3 border-b border-gray-100 flex items-center gap-2 flex-shrink-0">
-          {(
-            [
-              ['all', 'ALL', counts.all],
-              ['downloads', 'DOWNLOADS', counts.downloads],
-              ['transcriptions', 'TRANSCRIPTS', counts.transcriptions],
-            ] as [Filter, string, number][]
-          ).map(([key, label, count]) => (
+          {visibleFilters.map(([key, label, count]) => (
             <button
               key={key}
               onClick={() => setFilter(key)}

@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { open } from '@tauri-apps/plugin-dialog';
-import { FileVideo, Youtube, Mic, Loader2, Check, Copy, Download, Sparkles, Globe, X, Clock, CheckCircle, AlertCircle, FileAudio, ArrowLeft, List, Archive, Upload, Link } from 'lucide-react';
+import { FileVideo, Youtube, Mic, Loader2, Check, Copy, Download, Sparkles, Globe, X, Clock, CheckCircle, AlertCircle, FileAudio, ArrowLeft, List, Archive, Upload, Link, History } from 'lucide-react';
+import { HistoryView } from './HistoryView';
 import JSZip from 'jszip';
 import toast from 'react-hot-toast';
 import { useTranscriptionStore, TranscriptionJob } from '../stores/transcriptionStore';
@@ -46,6 +47,7 @@ export const TranscriptionTool: React.FC<{ onBack: () => void }> = ({ onBack }) 
   const [files, setFiles] = useState<{path: string, name: string, size?: number}[]>([]);
   const [method, setMethod] = useState<'whisper' | 'native'>('whisper');
   const [activeJobId, setActiveJobId] = useState<string | null>(null);
+  const [showHistory, setShowHistory] = useState(false);
 
   // Jobs live in the Zustand store so they survive navigation (back button)
   const jobs = useTranscriptionStore((s) => s.jobs);
@@ -236,6 +238,19 @@ export const TranscriptionTool: React.FC<{ onBack: () => void }> = ({ onBack }) 
       >
         <ArrowLeft className="h-5 w-5 text-orange-500 group-hover:-translate-x-1 transition-transform" />
       </button>
+
+      {/* History Button (Transcription-scoped) */}
+      <button
+        onClick={() => setShowHistory(true)}
+        className="fixed top-6 right-6 z-50 p-3 bg-white rounded-xl shadow-lg hover:shadow-xl transition-all duration-300 group"
+        title="Transcription history"
+      >
+        <History className="h-5 w-5 text-orange-500 group-hover:scale-110 transition-transform" />
+      </button>
+
+      {showHistory && (
+        <HistoryView scope="transcribe" onClose={() => setShowHistory(false)} />
+      )}
       
       <div className="relative z-10 max-w-7xl mx-auto">
         {/* Header */}

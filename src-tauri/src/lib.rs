@@ -158,14 +158,15 @@ fn record_transcription_history(source: &str, transcript: &str, site_type: Optio
     });
 }
 
-fn finalize_download_and_record(
+// Emit the download-complete UI event ASAP at 100% progress (do NOT record
+// history yet — yt-dlp may still run post-processors like [ExtractAudio]
+// that rewrite the destination filename, e.g. .webm → .mp3).
+fn emit_download_complete_event(
     window: &Window,
     download_id: &str,
     fallback_filename: &str,
     fallback_path: &str,
     final_dest: &Option<String>,
-    source_url: &str,
-    site_type: Option<&str>,
 ) {
     let final_path = final_dest.clone().unwrap_or_else(|| fallback_path.to_string());
     let final_name = std::path::Path::new(&final_path)
@@ -178,7 +179,23 @@ fn finalize_download_and_record(
         "path": final_path,
         "id": download_id,
     })).ok();
+}
 
+// Append the FINAL history entry after the yt-dlp process closes its stdout
+// (all post-processors are done). Uses the latest captured destination so
+// audio extracts record the .mp3 path, not the intermediate .webm.
+fn record_download_in_history(
+    fallback_filename: &str,
+    fallback_path: &str,
+    final_dest: &Option<String>,
+    source_url: &str,
+    site_type: Option<&str>,
+) {
+    let final_path = final_dest.clone().unwrap_or_else(|| fallback_path.to_string());
+    let final_name = std::path::Path::new(&final_path)
+        .file_name()
+        .map(|n| n.to_string_lossy().to_string())
+        .unwrap_or_else(|| fallback_filename.to_string());
     let size = fs::metadata(&final_path).ok().map(|m| m.len());
     append_history(HistoryEntry {
         id: uuid::Uuid::new_v4().to_string(),
@@ -681,17 +698,17 @@ async fn download_youtube(
                                 progress.id = Some(download_id.clone());
                                 window.emit("download-progress", &progress).ok();
 
-                                // Check if download completed (only emit once)
+                                // Emit the UI event as soon as percent hits 100,
+                                // but DO NOT record history yet — yt-dlp may still
+                                // run post-processors that change the destination.
                                 if !completed && progress.percent >= 100.0 {
                                     completed = true;
-                                    finalize_download_and_record(
+                                    emit_download_complete_event(
                                         &window,
                                         &download_id,
                                         &filename,
                                         &download_path_str,
                                         &current_dest,
-                                        &url_for_history,
-                                        None,
                                     );
                                 }
                             }
@@ -699,14 +716,12 @@ async fn download_youtube(
                         } else if line.contains("has already been downloaded") {
                             if !completed {
                                 completed = true;
-                                finalize_download_and_record(
+                                emit_download_complete_event(
                                     &window,
                                     &download_id,
                                     &filename,
                                     &download_path_str,
                                     &current_dest,
-                                    &url_for_history,
-                                    None,
                                 );
                             }
                             continue;
@@ -714,7 +729,7 @@ async fn download_youtube(
                             // Skip other technical messages
                             continue;
                         };
-                        
+
                         // Emit status update
                         window.emit("download-status", serde_json::json!({
                             "id": download_id.clone(),
@@ -725,7 +740,19 @@ async fn download_youtube(
                     }
                 }
             }
-            
+
+            // stdout closed — yt-dlp + post-processors are done. Record the
+            // FINAL destination (e.g. .mp3 after [ExtractAudio]) to history.
+            if completed {
+                record_download_in_history(
+                    &filename,
+                    &download_path_str,
+                    &current_dest,
+                    &url_for_history,
+                    None,
+                );
+            }
+
             // Also read stderr for any error messages
             if let Some(stderr) = stderr {
                 let stderr_reader = BufReader::new(stderr);
@@ -1222,17 +1249,15 @@ async fn download_universal(window: Window, url: String, site_type: Option<Strin
                                 progress.id = Some(download_id.clone());
                                 window.emit("download-progress", &progress).ok();
 
-                                // Check if download completed (only emit once)
+                                // Emit UI event at 100% but defer history append.
                                 if !completed && progress.percent >= 100.0 {
                                     completed = true;
-                                    finalize_download_and_record(
+                                    emit_download_complete_event(
                                         &window,
                                         &download_id,
                                         &filename,
                                         &download_path_str,
                                         &current_dest,
-                                        &url_for_history,
-                                        site_type_for_history.as_deref(),
                                     );
                                 }
                             }
@@ -1240,14 +1265,12 @@ async fn download_universal(window: Window, url: String, site_type: Option<Strin
                         } else if line.contains("has already been downloaded") {
                             if !completed {
                                 completed = true;
-                                finalize_download_and_record(
+                                emit_download_complete_event(
                                     &window,
                                     &download_id,
                                     &filename,
                                     &download_path_str,
                                     &current_dest,
-                                    &url_for_history,
-                                    site_type_for_history.as_deref(),
                                 );
                             }
                             continue;
@@ -1255,7 +1278,7 @@ async fn download_universal(window: Window, url: String, site_type: Option<Strin
                             // Skip other technical messages
                             continue;
                         };
-                        
+
                         // Emit status update
                         window.emit("download-status", serde_json::json!({
                             "id": download_id.clone(),
@@ -1266,7 +1289,19 @@ async fn download_universal(window: Window, url: String, site_type: Option<Strin
                     }
                 }
             }
-            
+
+            // stdout closed — yt-dlp + post-processors are done. Record FINAL
+            // destination (e.g. .mp3 after [ExtractAudio]) to history.
+            if completed {
+                record_download_in_history(
+                    &filename,
+                    &download_path_str,
+                    &current_dest,
+                    &url_for_history,
+                    site_type_for_history.as_deref(),
+                );
+            }
+
             // Also read stderr for any error messages
             if let Some(stderr) = stderr {
                 let stderr_reader = BufReader::new(stderr);
@@ -1510,6 +1545,7 @@ pub fn run() {
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_process::init())
         .plugin(tauri_plugin_shell::init())
+        .plugin(tauri_plugin_updater::Builder::new().build())
         .invoke_handler(tauri::generate_handler![
             get_youtube_info,
             get_youtube_formats,

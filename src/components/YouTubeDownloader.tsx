@@ -1,7 +1,8 @@
 import React, { useState, useEffect } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
-import { Loader2, Youtube, ArrowLeft, Check, Music, Video, CheckSquare, Square } from 'lucide-react';
+import { Loader2, Youtube, ArrowLeft, Check, Music, Video, CheckSquare, Square, History } from 'lucide-react';
+import { HistoryView } from './HistoryView';
 import { toast } from 'react-hot-toast';
 
 interface VideoFormat {
@@ -115,6 +116,7 @@ const deselectAllVideos = (setSelectedVideos: (videos: Set<string>) => void) => 
 
 export const YouTubeDownloader: React.FC<{ onBack: () => void }> = ({ onBack }) => {
   const [url, setUrl] = useState('');
+  const [showHistory, setShowHistory] = useState(false);
   const [loading, setLoading] = useState(false);
   const [downloading, setDownloading] = useState(false);
   const [progress, setProgress] = useState<DownloadProgress | null>(null);
@@ -465,6 +467,19 @@ export const YouTubeDownloader: React.FC<{ onBack: () => void }> = ({ onBack }) 
         >
           <ArrowLeft className="h-5 w-5 text-orange-500 group-hover:-translate-x-1 transition-transform" />
         </button>
+
+        {/* History Button (YouTube-scoped) */}
+        <button
+          onClick={() => setShowHistory(true)}
+          className="fixed top-6 right-6 z-50 p-3 bg-white rounded-xl shadow-lg hover:shadow-xl transition-all duration-300 group"
+          title="YouTube history"
+        >
+          <History className="h-5 w-5 text-orange-500 group-hover:scale-110 transition-transform" />
+        </button>
+
+        {showHistory && (
+          <HistoryView scope="youtube" onClose={() => setShowHistory(false)} />
+        )}
 
         <div className="max-w-7xl mx-auto">
 

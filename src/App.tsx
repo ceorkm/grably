@@ -10,6 +10,8 @@ import { ActiveDownloads } from './components/ActiveDownloads';
 import { HistoryView } from './components/HistoryView';
 import { listen } from '@tauri-apps/api/event';
 import { open } from '@tauri-apps/plugin-shell';
+import { check as checkForUpdate } from '@tauri-apps/plugin-updater';
+import { relaunch } from '@tauri-apps/plugin-process';
 
 const tools = [
   {
@@ -97,10 +99,75 @@ function App() {
         );
       });
       
+      // Auto-update check: 5s after launch, silently check GitHub release.
+      // If a newer signed version is available, show a non-blocking toast
+      // with an "Install & restart" action.
+      const updateTimer = setTimeout(async () => {
+        try {
+          const update = await checkForUpdate();
+          if (update?.available) {
+            toast(
+              (t) => (
+                <div style={{ fontFamily: 'Space Mono, monospace', display: 'flex', flexDirection: 'column', gap: 8 }}>
+                  <div style={{ fontSize: 13, fontWeight: 700, color: '#ea580c' }}>
+                    UPDATE AVAILABLE · v{update.version}
+                  </div>
+                  <div style={{ fontSize: 11, color: '#374151', maxWidth: 280, lineHeight: 1.35 }}>
+                    A new version of Grably is ready. Click to install — Grably will restart automatically.
+                  </div>
+                  <button
+                    onClick={async () => {
+                      toast.dismiss(t.id);
+                      const installToast = toast.loading('Downloading update…', {
+                        style: { fontFamily: 'Space Mono, monospace' },
+                      });
+                      try {
+                        await update.downloadAndInstall();
+                        toast.success('Update installed. Restarting…', { id: installToast });
+                        await relaunch();
+                      } catch (err) {
+                        toast.error(`Update failed: ${err}`, { id: installToast, duration: 6000 });
+                      }
+                    }}
+                    style={{
+                      padding: '8px 14px',
+                      background: 'linear-gradient(135deg, #ff6b35 0%, #ea580c 100%)',
+                      color: 'white',
+                      border: 'none',
+                      borderRadius: 10,
+                      fontFamily: 'Bebas Neue, sans-serif',
+                      fontSize: 16,
+                      letterSpacing: '0.04em',
+                      cursor: 'pointer',
+                    }}
+                  >
+                    Install & Restart
+                  </button>
+                </div>
+              ),
+              {
+                duration: 20000,
+                style: {
+                  background: 'linear-gradient(135deg, #fed7aa 0%, #ffedd5 100%)',
+                  border: '2px solid #fb923c',
+                  borderRadius: 14,
+                  padding: 14,
+                  maxWidth: 340,
+                },
+              }
+            );
+          }
+        } catch (err) {
+          // Network failure / no release yet / signature mismatch — keep silent.
+          console.warn('[updater] check failed:', err);
+        }
+      }, 5000);
+
       return () => {
         unlisten.then(fn => fn());
         unlistenToolSwitch.then(fn => fn());
         unlistenSetUrl.then(fn => fn());
+        clearTimeout(updateTimer);
       };
     } else {
       console.error('ERROR: Tauri API is required. This app cannot run in browser mode.');

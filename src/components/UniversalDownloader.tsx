@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { invoke } from '@tauri-apps/api/core';
-import { Download, Loader2, Globe2, ArrowLeft, List, Link } from 'lucide-react';
+import { Download, Loader2, Globe2, ArrowLeft, List, Link, History } from 'lucide-react';
+import { HistoryView } from './HistoryView';
 import toast from 'react-hot-toast';
 
 // Platform Icons as SVG Components
@@ -56,6 +57,7 @@ export const UniversalDownloader: React.FC<{ onBack: () => void }> = ({ onBack }
   const [bulkMode, setBulkMode] = useState(false);
   const [bulkProgress, setBulkProgress] = useState({ total: 0, started: 0 });
   const [detectedPlatform, setDetectedPlatform] = useState<string>('');
+  const [showHistory, setShowHistory] = useState(false);
 
   const detectPlatform = (inputUrl: string): string => {
     if (inputUrl.includes('instagram.com')) return 'instagram';
@@ -169,6 +171,19 @@ export const UniversalDownloader: React.FC<{ onBack: () => void }> = ({ onBack }
       >
         <ArrowLeft className="h-5 w-5 text-orange-500 group-hover:-translate-x-1 transition-transform" />
       </button>
+
+      {/* History Button (Universal-scoped) */}
+      <button
+        onClick={() => setShowHistory(true)}
+        className="fixed top-6 right-6 z-50 p-3 bg-white rounded-xl shadow-lg hover:shadow-xl transition-all duration-300 group"
+        title="Universal history"
+      >
+        <History className="h-5 w-5 text-orange-500 group-hover:scale-110 transition-transform" />
+      </button>
+
+      {showHistory && (
+        <HistoryView scope="universal" onClose={() => setShowHistory(false)} />
+      )}
 
       <div className="max-w-4xl mx-auto">
         {/* Header */}
