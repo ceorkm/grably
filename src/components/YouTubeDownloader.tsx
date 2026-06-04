@@ -3,6 +3,7 @@ import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
 import { Loader2, Youtube, ArrowLeft, Check, Music, Video, CheckSquare, Square, History } from 'lucide-react';
 import { HistoryView } from './HistoryView';
+import { DownloadButton } from './DownloadButton';
 import { toast } from 'react-hot-toast';
 
 interface VideoFormat {
@@ -467,6 +468,11 @@ export const YouTubeDownloader: React.FC<{ onBack: () => void }> = ({ onBack }) 
         >
           <ArrowLeft className="h-5 w-5 text-orange-500 group-hover:-translate-x-1 transition-transform" />
         </button>
+
+        {/* Download Center trigger (sits left of History) */}
+        <div className="fixed top-6 right-20 z-50">
+          <DownloadButton />
+        </div>
 
         {/* History Button (YouTube-scoped) */}
         <button

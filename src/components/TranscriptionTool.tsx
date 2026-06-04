@@ -1,7 +1,8 @@
 import React, { useState } from 'react';
 import { open } from '@tauri-apps/plugin-dialog';
-import { FileVideo, Youtube, Mic, Loader2, Check, Copy, Download, Sparkles, Globe, X, Clock, CheckCircle, AlertCircle, FileAudio, ArrowLeft, List, Archive, Upload, Link, History } from 'lucide-react';
+import { FileVideo, Youtube, Mic, Loader2, Check, Copy, Download, Sparkles, Globe, X, Clock, CheckCircle, AlertCircle, FileAudio, ArrowLeft, List, Archive, Upload, Link, History, RotateCcw } from 'lucide-react';
 import { HistoryView } from './HistoryView';
+import { DownloadButton } from './DownloadButton';
 import JSZip from 'jszip';
 import toast from 'react-hot-toast';
 import { useTranscriptionStore, TranscriptionJob } from '../stores/transcriptionStore';
@@ -52,6 +53,7 @@ export const TranscriptionTool: React.FC<{ onBack: () => void }> = ({ onBack }) 
   // Jobs live in the Zustand store so they survive navigation (back button)
   const jobs = useTranscriptionStore((s) => s.jobs);
   const enqueueJob = useTranscriptionStore((s) => s.enqueueJob);
+  const retryJob = useTranscriptionStore((s) => s.retryJob);
   const storeRemoveJob = useTranscriptionStore((s) => s.removeJob);
 
   const generateJobId = () => `job-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
@@ -75,7 +77,7 @@ export const TranscriptionTool: React.FC<{ onBack: () => void }> = ({ onBack }) 
     }
 
     if (selectedPlatform === 'video') {
-      const newJobs: TranscriptionJob[] = files.map(file => ({
+      const newJobs: TranscriptionJob[] = files.map((file, index) => ({
         id: generateJobId(),
         platform: selectedPlatform,
         fileName: file.name,
@@ -85,13 +87,14 @@ export const TranscriptionTool: React.FC<{ onBack: () => void }> = ({ onBack }) 
         statusMessage: 'Waiting...',
         startTime: new Date(),
         method,
+        ...(files.length > 1 ? { bulkIndex: index + 1, bulkTotal: files.length } : {}),
       }));
 
       newJobs.forEach((job) => enqueueJob(job));
       setFiles([]);
     } else if (bulkMode) {
       const urls = parseBulkUrls();
-      const newJobs: TranscriptionJob[] = urls.map(u => ({
+      const newJobs: TranscriptionJob[] = urls.map((u, index) => ({
         id: generateJobId(),
         platform: selectedPlatform,
         url: u,
@@ -99,6 +102,8 @@ export const TranscriptionTool: React.FC<{ onBack: () => void }> = ({ onBack }) 
         statusMessage: 'Waiting...',
         startTime: new Date(),
         method,
+        bulkIndex: index + 1,
+        bulkTotal: urls.length,
       }));
 
       toast.success(`Added ${urls.length} URLs to queue`);
@@ -210,6 +215,13 @@ export const TranscriptionTool: React.FC<{ onBack: () => void }> = ({ onBack }) 
   const activeJob = jobs.find(j => j.id === activeJobId);
   const processingCount = jobs.filter(j => j.status === 'processing').length;
   const queuedCount = jobs.filter(j => j.status === 'queued').length;
+  const failedJobs = jobs.filter(j => j.status === 'error');
+
+  const retryAllFailed = () => {
+    if (failedJobs.length === 0) return;
+    failedJobs.forEach(j => retryJob(j.id));
+    toast.success(`Retrying ${failedJobs.length} failed`);
+  };
 
   return (
     <>
@@ -238,6 +250,11 @@ export const TranscriptionTool: React.FC<{ onBack: () => void }> = ({ onBack }) 
       >
         <ArrowLeft className="h-5 w-5 text-orange-500 group-hover:-translate-x-1 transition-transform" />
       </button>
+
+      {/* Download Center trigger (sits left of History) */}
+      <div className="fixed top-6 right-20 z-50">
+        <DownloadButton />
+      </div>
 
       {/* History Button (Transcription-scoped) */}
       <button
@@ -512,16 +529,28 @@ export const TranscriptionTool: React.FC<{ onBack: () => void }> = ({ onBack }) 
           <div className="bg-gradient-to-br from-amber-50 to-orange-50 backdrop-blur-xl border-2 border-amber-300 rounded-3xl p-6">
             <div className="flex items-center justify-between mb-3">
               <h3 className="text-lg font-black text-gray-800" style={{ fontFamily: 'Archivo Black, sans-serif' }}>QUEUE</h3>
-              {jobs.filter(j => j.status === 'completed' && j.transcription).length >= 2 && (
-                <button
-                  onClick={downloadAllTranscriptions}
-                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-gradient-to-r from-orange-500 to-red-500 text-white hover:from-orange-600 hover:to-red-600 transition-all duration-300 transform hover:scale-105 shadow-md"
-                  title="Download all transcriptions as ZIP"
-                >
-                  <Archive className="w-3.5 h-3.5" />
-                  <span className="text-xs font-black uppercase" style={{ fontFamily: 'Bebas Neue, cursive', letterSpacing: '1px' }}>Download All</span>
-                </button>
-              )}
+              <div className="flex items-center gap-2">
+                {failedJobs.length > 0 && (
+                  <button
+                    onClick={retryAllFailed}
+                    className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-gradient-to-r from-red-500 to-orange-500 text-white hover:from-red-600 hover:to-orange-600 transition-all duration-300 transform hover:scale-105 shadow-md"
+                    title="Retry all failed transcriptions"
+                  >
+                    <RotateCcw className="w-3.5 h-3.5" />
+                    <span className="text-xs font-black uppercase" style={{ fontFamily: 'Bebas Neue, cursive', letterSpacing: '1px' }}>Retry Failed ({failedJobs.length})</span>
+                  </button>
+                )}
+                {jobs.filter(j => j.status === 'completed' && j.transcription).length >= 2 && (
+                  <button
+                    onClick={downloadAllTranscriptions}
+                    className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-gradient-to-r from-orange-500 to-red-500 text-white hover:from-orange-600 hover:to-red-600 transition-all duration-300 transform hover:scale-105 shadow-md"
+                    title="Download all transcriptions as ZIP"
+                  >
+                    <Archive className="w-3.5 h-3.5" />
+                    <span className="text-xs font-black uppercase" style={{ fontFamily: 'Bebas Neue, cursive', letterSpacing: '1px' }}>Download All</span>
+                  </button>
+                )}
+              </div>
             </div>
 
             {jobs.length === 0 ? (
@@ -552,9 +581,16 @@ export const TranscriptionTool: React.FC<{ onBack: () => void }> = ({ onBack }) 
                   >
                     <div className="flex items-center justify-between gap-2">
                       <div className="flex-1 min-w-0">
-                        <p className="text-xs font-bold truncate pr-2" style={{ fontFamily: 'Space Mono, monospace', color: '#92400e' }}>
-                          {job.fileName || job.url || 'Transcription'}
-                        </p>
+                        <div className="flex items-center gap-1.5">
+                          {job.bulkIndex && (
+                            <span className="flex-shrink-0 px-1.5 py-0.5 rounded-md bg-orange-500/15 text-[10px] font-black tabular-nums" style={{ color: '#92400e' }}>
+                              {job.bulkIndex}/{job.bulkTotal}
+                            </span>
+                          )}
+                          <p className="text-xs font-bold truncate pr-2" style={{ fontFamily: 'Space Mono, monospace', color: '#92400e' }}>
+                            {job.fileName || job.url || 'Transcription'}
+                          </p>
+                        </div>
                         <div className="flex items-center gap-2 mt-1">
                           {job.status === 'processing' && (
                             <>
@@ -582,15 +618,29 @@ export const TranscriptionTool: React.FC<{ onBack: () => void }> = ({ onBack }) 
                           )}
                         </div>
                       </div>
-                      <button
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          removeJob(job.id);
-                        }}
-                        className="p-1 rounded-lg hover:bg-red-500/20 transition-colors"
-                      >
-                        <X className="w-4 h-4 text-gray-600 hover:text-red-500" />
-                      </button>
+                      <div className="flex items-center gap-1 flex-shrink-0">
+                        {job.status === 'error' && (
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              retryJob(job.id);
+                            }}
+                            className="p-1 rounded-lg hover:bg-orange-500/20 transition-colors"
+                            title="Retry"
+                          >
+                            <RotateCcw className="w-4 h-4 text-orange-600 hover:text-orange-700" />
+                          </button>
+                        )}
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            removeJob(job.id);
+                          }}
+                          className="p-1 rounded-lg hover:bg-red-500/20 transition-colors"
+                        >
+                          <X className="w-4 h-4 text-gray-600 hover:text-red-500" />
+                        </button>
+                      </div>
                     </div>
                     {job.status === 'processing' && (
                       <div className="mt-2">
@@ -630,7 +680,14 @@ export const TranscriptionTool: React.FC<{ onBack: () => void }> = ({ onBack }) 
               <div className="h-96 flex items-center justify-center">
                 <div className="text-center">
                   <AlertCircle className="w-12 h-12 text-red-500 mx-auto mb-3" />
-                  <p className="text-red-500 text-sm">{activeJob.error}</p>
+                  <p className="text-red-500 text-sm mb-4 px-4 break-words">{activeJob.error}</p>
+                  <button
+                    onClick={() => retryJob(activeJob.id)}
+                    className="inline-flex items-center gap-2 px-4 py-2 rounded-xl bg-gradient-to-r from-orange-500 to-red-500 text-white hover:from-orange-600 hover:to-red-600 transition-all duration-300 transform hover:scale-105 shadow-md"
+                  >
+                    <RotateCcw className="w-4 h-4" />
+                    <span className="text-sm font-black uppercase" style={{ fontFamily: 'Bebas Neue, cursive', letterSpacing: '1px' }}>Retry</span>
+                  </button>
                 </div>
               </div>
             ) : activeJob.transcription ? (

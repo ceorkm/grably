@@ -20,6 +20,8 @@ export interface TranscriptionJob {
   startTime: Date;
   endTime?: Date;
   method: TranscriptionMethod;
+  bulkIndex?: number;
+  bulkTotal?: number;
 }
 
 interface TranscriptionState {
@@ -27,6 +29,7 @@ interface TranscriptionState {
   activeCount: number;
   pendingQueue: TranscriptionJob[];
   enqueueJob: (job: TranscriptionJob) => void;
+  retryJob: (id: string) => void;
   updateJob: (id: string, patch: Partial<TranscriptionJob>) => void;
   removeJob: (id: string) => void;
   clearCompleted: () => void;
@@ -176,6 +179,28 @@ export const useTranscriptionStore = create<TranscriptionState>((set) => ({
       void runJob(job);
     } else {
       set((s) => ({ pendingQueue: [...s.pendingQueue, job] }));
+    }
+  },
+
+  retryJob: (id) => {
+    const state = useTranscriptionStore.getState();
+    const job = state.jobs.find((j) => j.id === id);
+    if (!job) return;
+    const resetJob: TranscriptionJob = {
+      ...job,
+      status: 'queued',
+      statusMessage: 'Waiting...',
+      error: undefined,
+      transcription: undefined,
+      endTime: undefined,
+      startTime: new Date(),
+    };
+    set((s) => ({ jobs: s.jobs.map((j) => (j.id === id ? resetJob : j)) }));
+    if (state.activeCount < MAX_CONCURRENT) {
+      set((s) => ({ activeCount: s.activeCount + 1 }));
+      void runJob(resetJob);
+    } else {
+      set((s) => ({ pendingQueue: [...s.pendingQueue, resetJob] }));
     }
   },
 

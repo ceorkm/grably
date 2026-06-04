@@ -6,7 +6,8 @@ import Typewriter from 'typewriter-effect';
 import { YouTubeDownloader } from './components/YouTubeDownloader';
 import { UniversalDownloader } from './components/UniversalDownloader';
 import { TranscriptionTool } from './components/TranscriptionTool';
-import { ActiveDownloads } from './components/ActiveDownloads';
+import { DownloadCenter } from './components/DownloadCenter';
+import { DownloadButton } from './components/DownloadButton';
 import { HistoryView } from './components/HistoryView';
 import { listen } from '@tauri-apps/api/event';
 import { open } from '@tauri-apps/plugin-shell';
@@ -103,6 +104,10 @@ function App() {
       // If a newer signed version is available, show a non-blocking toast
       // with an "Install & restart" action.
       const updateTimer = setTimeout(async () => {
+        // Only check for updates in a real (production) build. In `tauri dev`
+        // the running binary is not an installed .app, so the updater can
+        // never actually install — checking here just nags on every launch.
+        if (!import.meta.env.PROD) return;
         try {
           const update = await checkForUpdate();
           if (update?.available) {
@@ -222,6 +227,7 @@ function App() {
 
             {/* Top Right Buttons */}
             <div className="fixed top-6 right-6 z-50 flex space-x-3">
+              <DownloadButton round />
               <button
                 onClick={() => setShowHistory(true)}
                 className="p-3 bg-white rounded-full shadow-md hover:shadow-lg transition-all duration-200 group"
@@ -391,8 +397,8 @@ function App() {
     <>
       {renderView()}
 
-      {/* Active Downloads Widget */}
-      <ActiveDownloads />
+      {/* Download Center (browser-style toolbar icon + popover) */}
+      <DownloadCenter />
 
       {/* History Modal */}
       {showHistory && (
