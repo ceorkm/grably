@@ -4054,7 +4054,7 @@ dependencies = [
 
 [[package]]
 name = "tauri-app"
-version = "0.1.0"
+version = "1.0.20260604"
 dependencies = [
  "dirs 5.0.1",
  "serde",
